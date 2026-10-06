@@ -679,7 +679,7 @@ fn main_inner() -> Result<i32> {
         "configure" => {
             let _lock = FileLock::exclusive(&kit.base.join(".lifecycle.lock"))?;
             kit.c = read_json(&kit.base.join("config.json"))?;
-            if (args.len() - 1) % 2 != 0 {
+            if !(args.len() - 1).is_multiple_of(2) {
                 return Err("configure требует пары --параметр значение".into());
             }
             for pair in args[1..].chunks(2) {

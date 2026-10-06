@@ -7,7 +7,10 @@ concurrency:
   group: release
   cancel-in-progress: false
 jobs:
+  quality:
+    uses: ./.github/workflows/quality.yml
   draft:
+    needs: quality
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
