@@ -17,7 +17,7 @@ class ProfileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
             base = home / 'kit'; base.mkdir()
-            original = '# настройки\nexport EDITOR=vim\nexport PATH=/my/tools:$PATH\n'.encode()
+            original = '# настройки\nexport EDITOR=vim\nexport PATH=/my/tools:$PATH'.encode()
             profile = home / '.profile'; profile.write_bytes(original)
             with patch.object(runtime.Path, 'home', return_value=home):
                 runtime.profile_edit(base=base)

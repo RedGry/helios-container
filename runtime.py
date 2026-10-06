@@ -32,6 +32,10 @@ def profile_edit(install=True, base=DEFAULT_HOME):
         elif original[end:end + 1] == b'\n':
             end += 1
         content = original[:start] + original[end:]
+    if not install and (base / 'profile.before').exists():
+        backup_content = (base / 'profile.before').read_bytes()
+        if backup_content and not backup_content.endswith(b'\n') and content == backup_content + b'\n':
+            content = backup_content
     if install:
         backup = base / 'profile.before'
         if not backup.exists():

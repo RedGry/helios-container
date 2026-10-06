@@ -22,8 +22,21 @@ mkdir -p "$HOME/.local"
 hc_temp=$(mktemp -d "$HOME/.local/helios-container-install.XXXXXXXX")
 case "$hc_temp" in "$HOME"/.local/helios-container-install.*) ;; *) exit 1 ;; esac
 trap 'rm -rf -- "$hc_temp"' EXIT HUP INT TERM
-curl -fL --retry 3 --connect-timeout 15 --max-time 120 \
-    https://codeload.github.com/RedGry/helios-container/tar.gz/refs/heads/main \
-    -o "$hc_temp/source.tar.gz"
+if [ -n "${GH_TOKEN:-}" ]; then
+    printf 'Authorization: Bearer %s\n' "$GH_TOKEN" | \
+        curl -fL --retry 3 --connect-timeout 15 --max-time 120 -H @- \
+        https://api.github.com/repos/RedGry/helios-container/tarball/main \
+        -o "$hc_temp/source.tar.gz"
+else
+    curl -fL --retry 3 --connect-timeout 15 --max-time 120 \
+        https://codeload.github.com/RedGry/helios-container/tar.gz/refs/heads/main \
+        -o "$hc_temp/source.tar.gz"
+fi
+unset GH_TOKEN
 tar -xzf "$hc_temp/source.tar.gz" -C "$hc_temp"
-"$hc_python" "$hc_temp/helios-container-main/installer.py" "$@"
+hc_source=''
+for candidate in "$hc_temp"/*/installer.py; do
+    if [ -f "$candidate" ]; then hc_source=$candidate; break; fi
+done
+if [ -z "$hc_source" ]; then echo 'В архиве не найден installer.py.' >&2; exit 1; fi
+"$hc_python" "$hc_source" "$@"
