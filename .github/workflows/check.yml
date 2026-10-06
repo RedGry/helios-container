@@ -41,6 +41,7 @@ jobs:
             sh native/build.sh
             python3.11 native/tests/lifecycle.py native/target/release/helios-container-native
             python3.11 native/tests/gateway.py native/target/release/helios-container-native
+            python3.11 native/tests/update.py native/target/release/helios-container-native
             python3.11 -m unittest discover -s tests -p test_release.py -v
             python3.11 tools/release.py --binary native/target/release/helios-container-native
             python3.11 tools/release.py --verify
