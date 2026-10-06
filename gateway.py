@@ -19,6 +19,7 @@ import urllib.parse
 import urllib.request
 
 from runtime import Kit, free_port
+from dashboard import Dashboard
 
 MAX_BODY = 8 * 1024**2
 MAX_RESPONSE = 16 * 1024**2
@@ -195,6 +196,7 @@ class Gateway(ThreadingHTTPServer):
         self.base = base
         self.state = load(base)
         self.config_lock = threading.Lock()
+        self.dashboard = Dashboard(base)
         self.slots = threading.BoundedSemaphore(8)
         super().__init__(('127.0.0.1', self.state['agent_port']), Handler)
 
@@ -241,6 +243,21 @@ class Handler(BaseHTTPRequestHandler):
             self.json_reply(403, {'error': 'Нет доступа к шлюзу.'}); return
         if self.path == '/_health' and self.command == 'GET':
             self.reply(200, b'helios-container gateway'); return
+        parsed = urllib.parse.urlsplit(self.path)
+        if parsed.path in ('/_dashboard', '/_logs'):
+            if not hmac.compare_digest(self.headers.get('X-HC-Admin', ''), state['admin_key']):
+                self.json_reply(401, {'error': 'Откройте приватную ссылку из helios-container web info.'}); return
+            if self.command != 'GET':
+                self.json_reply(405, {'error': 'Панель доступна только для чтения.'}); return
+            if parsed.path == '/_logs':
+                query = urllib.parse.parse_qs(parsed.query)
+                data = self.server.dashboard.logs(query.get('id', [''])[0], query.get('tail', ['200'])[0])
+            else:
+                data = dict(self.server.dashboard.snapshot())
+                data['routes'] = [{'kind': r['kind'], 'port': r['port'],
+                                   'path': f'/{r["kind"]}/{r["port"]}/',
+                                   'listening': owned_listener(r['target'])} for r in list(state['routes'])]
+            self.json_reply(200, data); return
         if self.path == '/_config':
             if not hmac.compare_digest(self.headers.get('X-HC-Admin', ''), state['admin_key']):
                 self.json_reply(401, {'error': 'Откройте приватную ссылку из helios-container web info.'}); return

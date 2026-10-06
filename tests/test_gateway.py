@@ -100,6 +100,22 @@ class GatewayTests(unittest.TestCase):
             with self.assertRaises(ValueError): gateway.parse_ports(value)
         self.assertEqual(gateway.parse_ports('8080, 8080 host:3000'), [{'kind': 'vm', 'port': 8080}, {'kind': 'host', 'port': 3000}])
 
+    def test_dashboard_and_logs_require_key_and_are_read_only(self):
+        for path in ('/_dashboard', '/_logs?id=' + 'a' * 64):
+            with patch.object(self.server.dashboard, 'snapshot') as snapshot, patch.object(self.server.dashboard, 'logs') as logs:
+                self.assertEqual(self.request(path)[0], 401)
+                self.assertEqual(self.request(path, headers={'X-HC-Admin': 'wrong'})[0], 401)
+                self.assertEqual(self.request(path, 'POST', headers={'X-HC-Admin': 'admin-secret'})[0], 405)
+                snapshot.assert_not_called(); logs.assert_not_called()
+        snapshot = {'vm': {'running': True}, 'containers': [], 'updated_at': 1, 'error': None}
+        with patch.object(self.server.dashboard, 'snapshot', return_value=snapshot):
+            code, headers, raw = self.request('/_dashboard', headers={'X-HC-Admin': 'admin-secret'})
+            self.assertEqual(code, 200)
+            self.assertEqual(dict(headers)['Cache-Control'], 'no-store')
+            self.assertTrue(json.loads(raw)['routes'][0]['listening'])
+            self.assertNotIn('secret', raw.decode())
+        self.assertEqual(self.request('/_logs?id=--help', headers={'X-HC-Admin': 'admin-secret'})[0], 400)
+
 
 class RemovalTests(unittest.TestCase):
     def test_removal_preserves_user_files(self):
