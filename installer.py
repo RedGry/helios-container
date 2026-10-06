@@ -208,7 +208,7 @@ def main():
     base = args.prefix.expanduser().resolve()
     prerequisites(args.prefix.expanduser())
     if not (512 <= args.memory <= 16384 and 1 <= args.cpus <= 4 and 4 <= args.disk <= 64):
-        raise RuntimeError('RAM: 512–16384 МиБ; CPU: 1–4; диск: 4–64 ГиБ.')
+        raise RuntimeError('RAM: 512–16384 МиБ, CPU: 1–4, диск: 4–64 ГиБ.')
     os.umask(0o077)
     base.mkdir(parents=True, mode=0o700, exist_ok=True)
     base.chmod(0o700)
@@ -224,7 +224,7 @@ def main():
         qemu_payload(base)
         guest(base, args.disk)
     source = Path(__file__).resolve().parent
-    for name in ('runtime.py', 'profile.py', 'README.md'):
+    for name in ('runtime.py', 'profile.py', 'gateway.py', 'gateway.php', 'README.md'):
         if (source / name).resolve() != (base / name).resolve():
             shutil.copy2(source / name, base / name)
     if not args.no_launchers:

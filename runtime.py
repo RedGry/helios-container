@@ -19,7 +19,7 @@ PROFILE_END = b'# <<< helios-container <<<'
 def profile_edit(install=True, base=DEFAULT_HOME):
     profile = Path.home() / '.profile'
     if profile.is_symlink():
-        raise RuntimeError('.profile является ссылкой; настройте PATH вручную.')
+        raise RuntimeError('.profile является ссылкой. Настройте PATH вручную.')
     original = profile.read_bytes() if profile.exists() else b''
     start, end = original.find(PROFILE_BEGIN), original.find(PROFILE_END)
     if (start < 0) != (end < 0) or (start >= 0 and end < start):
@@ -138,6 +138,9 @@ class Kit:
             print(f'VM запущена: {c["cpus"]} CPU, {c["memory_mib"]} МиБ RAM. SSH: 127.0.0.1:{c["ssh_port"]}', file=sys.stderr, flush=True)
         if wait:
             self.wait_ready()
+        if (self.base / 'web.json').exists():
+            from gateway import ensure_agent
+            ensure_agent(self.base)
 
     def wait_ready(self, timeout=600):
         pid = self.pid()
@@ -169,6 +172,21 @@ class Kit:
     def ensure(self):
         self.start(wait=True)
 
+    def forward(self, guest, preferred=None):
+        if not 1 <= guest <= 65535 or (preferred is not None and not 1024 <= preferred <= 65535):
+            raise RuntimeError('Порт VM: 1–65535, порт helios: 1024–65535.')
+        for mapping in self.config.get('forwards', []):
+            if mapping['guest'] == guest:
+                return mapping['host']
+        self.ensure()
+        host = free_port(preferred or 0)
+        answer = self.qmp('human-monitor-command', {'command-line': f'hostfwd_add net0 tcp:127.0.0.1:{host}-:{guest}'})
+        if answer.strip():
+            raise RuntimeError(answer.strip())
+        self.config.setdefault('forwards', []).append({'guest': guest, 'host': host})
+        self.save()
+        return host
+
     def stop(self, force=False):
         if not self.pid():
             print('VM остановлена.')
@@ -178,13 +196,16 @@ class Kit:
         while self.pid() and time.monotonic() < deadline:
             time.sleep(1)
         if self.pid():
-            raise RuntimeError('Выключение ещё не завершилось. Повторите status; stop --force завершает VM без корректного выключения.')
+            raise RuntimeError('Выключение ещё не завершилось. Повторите status. stop --force завершает VM без корректного выключения.')
         print('VM остановлена.')
 
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     kit = Kit()
+    if argv and argv[0] == 'web':
+        from gateway import manage
+        return manage(kit, argv[1:])
     if argv and argv[0] == 'docker':
         kit.ensure()
         tty = sys.stdin.isatty() and any(x in ('-it', '-ti', '-t', '--tty', '--tty=true') for x in argv[1:])
@@ -195,6 +216,7 @@ def main(argv=None):
     sub.add_parser('status')
     sub.add_parser('logs')
     sub.add_parser('profile')
+    sub.add_parser('web', help='Опциональный HTTPS-шлюз в public_html')
     stop = sub.add_parser('stop'); stop.add_argument('--force', action='store_true')
     shell = sub.add_parser('ssh'); shell.add_argument('command', nargs=argparse.REMAINDER)
     for name in ('upload', 'download'):
@@ -209,7 +231,7 @@ def main(argv=None):
         kit.stop(args.force)
     elif args.action == 'status':
         c = kit.config
-        print(f'{"Работает" if kit.pid() else "Остановлена"}; {c["cpus"]} CPU, {c["memory_mib"]} МиБ RAM; SSH 127.0.0.1:{c["ssh_port"]}')
+        print(f'{"Работает" if kit.pid() else "Остановлена"}, {c["cpus"]} CPU, {c["memory_mib"]} МиБ RAM, SSH 127.0.0.1:{c["ssh_port"]}')
         if kit.pid():
             subprocess.run(['ps', '-p', str(kit.pid()), '-o', 'pid,rss,%cpu,etime,comm'])
         for mapping in c.get('forwards', []):
@@ -245,19 +267,8 @@ def main(argv=None):
             source = 'root@127.0.0.1:' + source
         return subprocess.call(['scp', '-r'] + kit.ssh_options(scp=True) + ['--', source, destination])
     elif args.action == 'forward':
-        if not 1 <= args.guest <= 65535 or (args.host is not None and not 1024 <= args.host <= 65535):
-            raise RuntimeError('Порт VM: 1–65535; порт helios: 1024–65535.')
-        for mapping in kit.config.get('forwards', []):
-            if mapping['guest'] == args.guest:
-                print(f'Уже настроено: 127.0.0.1:{mapping["host"]} → VM:{args.guest}')
-                return 0
-        kit.ensure()
-        host = free_port(args.host or 0)
-        answer = kit.qmp('human-monitor-command', {'command-line': f'hostfwd_add net0 tcp:127.0.0.1:{host}-:{args.guest}'})
-        if answer.strip():
-            raise RuntimeError(answer.strip())
-        kit.config.setdefault('forwards', []).append({'guest': args.guest, 'host': host})
-        kit.save(); print(f'TCP 127.0.0.1:{host} → VM:{args.guest}')
+        host = kit.forward(args.guest, args.host)
+        print(f'TCP 127.0.0.1:{host} → VM:{args.guest}')
     elif args.action == 'uninstall':
         if not args.yes:
             raise RuntimeError('Удаляет VM, контейнеры и volumes. Для подтверждения: uninstall --yes')
@@ -266,6 +277,9 @@ def main(argv=None):
         root = kit.base.resolve()
         if not root.is_relative_to(Path.home().resolve()) or root == Path.home().resolve() or kit.base.is_symlink():
             raise RuntimeError('Отказ удаления: установка должна находиться внутри HOME.')
+        if (kit.base / 'web.json').exists():
+            from gateway import manage
+            manage(kit, ['remove'])
         if (kit.base / 'profile.before').exists():
             profile_edit(install=False, base=kit.base)
         for name in ('docker', 'helios-container'):
@@ -273,7 +287,7 @@ def main(argv=None):
             if launcher.exists() and not launcher.is_symlink() and '# helios-container managed launcher' in launcher.read_text() and str(kit.base / 'runtime.py') in launcher.read_text():
                 launcher.unlink()
         shutil.rmtree(root)
-        print('Установка удалена; остальные файлы HOME сохранены.')
+        print('Установка удалена. Остальные файлы HOME сохранены.')
     return 0
 
 

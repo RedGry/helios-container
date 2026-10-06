@@ -9,5 +9,6 @@ jobs:
         with:
           python-version: '3.11'
       - run: python -m unittest discover -s tests -v
-      - run: python -m py_compile runtime.py installer.py profile.py
+      - run: python -m py_compile runtime.py installer.py profile.py gateway.py
       - run: sh -n install.sh
+      - run: php -l gateway.php
