@@ -2,6 +2,8 @@ import json
 from contextlib import nullcontext
 from pathlib import Path
 import sys
+import threading
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -23,6 +25,28 @@ class DashboardTests(unittest.TestCase):
             self.assertFalse(self.panel.snapshot()['vm']['running'])
             run.assert_not_called(); self.kit.ssh.assert_not_called()
 
+    def test_initial_and_cached_requests_never_wait_for_collection(self):
+        entered, release, done = threading.Event(), threading.Event(), threading.Event()
+        def collect():
+            entered.set()
+            release.wait(2)
+            done.set()
+        with patch.object(dashboard, 'Kit', return_value=self.kit), patch.object(self.panel, '_quick_collect'), patch.object(self.panel, '_collect', side_effect=collect) as collector:
+            try:
+                start = time.monotonic()
+                first = self.panel.snapshot()
+                self.assertLess(time.monotonic()-start, 0.2)
+                self.assertTrue(first['loading'])
+                self.assertTrue(entered.wait(1))
+                start = time.monotonic()
+                second = self.panel.snapshot()
+                self.assertLess(time.monotonic()-start, 0.2)
+                self.assertTrue(second['refreshing'])
+                self.assertEqual(collector.call_count, 1)
+            finally:
+                release.set()
+                self.assertTrue(done.wait(1))
+
     def test_snapshot_coalesces_polling_and_selects_only_resource_fields(self):
         row = {name: '' for name in dashboard.FIELDS}
         row.update(ID='a' * 64, protocol='javascript:evil', polling='true', project='demo', service='web')
@@ -32,8 +56,8 @@ class DashboardTests(unittest.TestCase):
         volume = {'Name': 'demo-data', 'Driver': 'local', 'Scope': 'local', 'project': 'demo'}
         raw = (json.dumps(row) + '\nHC_IMAGES\n' + json.dumps(image) + '\nHC_VOLUMES\n' + json.dumps(volume) + '\nHC_MOUNTS\n' + json.dumps(mount) + '\nHC_STATS\n' + json.dumps(stats) + '\nHC_MEMORY\n3925000\n').encode()
         with patch.object(dashboard, 'Kit', return_value=self.kit), patch.object(dashboard.threading, 'Thread'), patch.object(dashboard.subprocess, 'run', return_value=SimpleNamespace(stdout=raw)) as run:
-            data = self.panel.snapshot()
-            self.assertIs(data, self.panel.snapshot()); self.assertEqual(run.call_count, 1)
+            data = self.panel._collect()
+            self.assertEqual(data['containers'], self.panel.snapshot()['containers']); self.assertEqual(run.call_count, 1)
             container = data['containers'][0]
             self.assertEqual(container['protocol'], 'unknown')
             self.assertEqual(container['metrics']['CPUPerc'], '1.25%')
@@ -121,7 +145,7 @@ class DashboardTests(unittest.TestCase):
     def test_vm_resources_remain_available_when_docker_is_stopped(self):
         raw = b'HC_HEALTH\n4096000\n1024000\ncpu 100 0 20 300 0 0 0 0\n/dev/vda 10000000 2000000 8000000 20% /\n\nHC_INVENTORY\n'
         with patch.object(dashboard, 'Kit', return_value=self.kit), patch.object(dashboard.subprocess, 'run', return_value=SimpleNamespace(stdout=raw)), patch.object(dashboard.threading, 'Thread'):
-            data = self.panel.snapshot()
+            data = self.panel._collect()
         self.assertTrue(data['vm']['running'])
         self.assertFalse(data['vm']['docker_running'])
         self.assertEqual(data['vm']['memory_used_bytes'], 3072000 * 1024)

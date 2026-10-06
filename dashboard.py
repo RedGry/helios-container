@@ -40,76 +40,149 @@ class Dashboard:
         self.storage_due = 0
         self.storage_running = False
         self.cpu_sample = None
+        self.refreshing = False
 
     def snapshot(self):
-        # Coalesce browser polling. Do not start a stopped VM to inspect it.
+        # Never hold the response path behind slow guest SSH or docker stats.
         with self.lock:
-            if self.cached is not None and time.monotonic() < self.expires:
-                return self._with_storage(self.cached)
-            kit = Kit(self.base)
-            data = {'vm': {'running': bool(kit.pid()), 'cpus': kit.config['cpus'],
-                           'memory_mib': kit.config['memory_mib']}, 'containers': [], 'images': [], 'volumes': [],
-                    'updated_at': int(time.time()), 'error': None}
-            marker = self.base / 'VERSION'
-            data['kit_version'] = marker.read_text().strip()[:40] if marker.is_file() else 'dev'
-            data['vm'].update(cpu_percent=None, memory_used_bytes=None, disk_used_bytes=None, disk_total_bytes=None, docker_version=None, docker_running=False)
-            if data['vm']['running']:
-                command = shlex.join(['docker', 'container', 'ls', '-a', '--no-trunc', '--format', PS_FORMAT])
-                command += " && printf '\\nHC_IMAGES\\n' && " + shlex.join(['docker', 'image', 'ls', '--all', '--no-trunc', '--format', IMAGE_FORMAT])
-                command += " && printf '\\nHC_VOLUMES\\n' && " + shlex.join(['docker', 'volume', 'ls', '--format', VOLUME_FORMAT])
-                command += " && printf '\\nHC_MOUNTS\\n' && docker container ls -aq | xargs -r " + shlex.join(['docker', 'inspect', '--format', MOUNT_FORMAT])
-                command += " && printf '\\nHC_STATS\\n' && docker stats --no-stream --format '{{json .}}'"
-                command += " && printf '\\nHC_MEMORY\\n' && awk '/MemTotal:/ {print $2}' /proc/meminfo"
-                command += " && printf '\\nHC_VERSION\\n' && docker info --format '{{.ServerVersion}}'"
-                command = "printf 'HC_HEALTH\\n'; awk '/MemTotal:/ {t=$2} /MemAvailable:/ {a=$2} END {print t; print a}' /proc/meminfo; head -n 1 /proc/stat; df -k /var/lib/docker | tail -n 1; printf '\\nHC_INVENTORY\\n'; " + command
-                try:
-                    result = subprocess.run(kit.ssh(command), capture_output=True, timeout=15, check=False)
-                    raw = result.stdout.decode('utf-8', 'replace')
-                    if raw.startswith('HC_HEALTH\n'):
-                        health, raw = raw.split('\nHC_INVENTORY\n', 1)
-                        lines = health.splitlines()[1:]
-                        data['vm']['memory_total_bytes'] = int(lines[0]) * 1024
-                        data['vm']['memory_used_bytes'] = max(0, (int(lines[0]) - int(lines[1])) * 1024)
-                        ticks = [int(v) for v in lines[2].split()[1:9]]
-                        sample = (sum(ticks), ticks[3] + ticks[4])
-                        if self.cpu_sample and sample[0] > self.cpu_sample[0]:
-                            data['vm']['cpu_percent'] = round(100 * (1 - (sample[1] - self.cpu_sample[1]) / (sample[0] - self.cpu_sample[0])), 2)
-                        self.cpu_sample = sample
-                        disk = lines[3].split()
-                        data['vm'].update(disk_total_bytes=int(disk[1])*1024, disk_used_bytes=int(disk[2])*1024)
-                    listing, rest = raw.split('\nHC_IMAGES\n', 1)
-                    images, rest = rest.split('\nHC_VOLUMES\n', 1)
-                    volumes, rest = rest.split('\nHC_MOUNTS\n', 1)
-                    mounts, stats = rest.split('\nHC_STATS\n', 1)
-                    stats, memory = stats.split('\nHC_MEMORY\n', 1)
-                    if '\nHC_VERSION\n' in memory:
-                        memory, version = memory.split('\nHC_VERSION\n', 1)
-                        data['vm']['docker_version'] = version.strip()[:40]
-                    data['vm']['docker_running'] = True
-                    data['vm']['memory_total_bytes'] = int(memory.strip()) * 1024
-                    details = {row['ID']: row for row in map(json.loads, mounts.splitlines()) if row}
-                    usage = {row['ID']: row for row in map(json.loads, stats.splitlines()) if row}
-                    for raw in listing.splitlines():
-                        row = json.loads(raw)
-                        row['protocol'] = row['protocol'] if row['protocol'] in ('http', 'https', 'tcp', 'udp') else 'unknown'
-                        row['polling'] = row['polling'] if row['polling'] in ('true', 'false') else 'unknown'
-                        metric = next((value for ident, value in usage.items() if row['ID'].startswith(ident)), {})
-                        row['metrics'] = {key: metric.get(key) for key in ('CPUPerc', 'MemUsage', 'MemPerc', 'NetIO', 'BlockIO', 'PIDs')}
-                        detail = details.get(row['ID'], {})
-                        row['image_id'] = detail.get('image_id', '')
-                        row['started_at'] = detail.get('started_at', '')
-                        row['mounts'] = [{key: mount.get(key) for key in ('Type', 'Name', 'Destination', 'RW')} for mount in detail.get('mounts', [])]
-                        data['containers'].append(row)
-                    data['images'] = [json.loads(row) for row in images.splitlines() if row]
-                    data['volumes'] = [json.loads(row) for row in volumes.splitlines() if row]
-                    for image in data['images']:
-                        image['containers'] = [c['Names'] for c in data['containers'] if c['image_id'] == image['ID']]
-                    for volume in data['volumes']:
-                        volume['containers'] = [c['Names'] for c in data['containers'] if any(m['Type'] == 'volume' and m['Name'] == volume['Name'] for m in c['mounts'])]
-                except (subprocess.SubprocessError, OSError, ValueError, KeyError, IndexError):
-                    data['error'] = 'Docker пока не отвечает. VM может загружаться.'
-            self.cached, self.expires = data, time.monotonic() + 5
-            return self._with_storage(data)
+            if self.cached is None:
+                kit = Kit(self.base)
+                marker = self.base / 'VERSION'
+                self.cached = {'vm': {'running': bool(kit.pid()), 'cpus': kit.config['cpus'],
+                    'memory_mib': kit.config['memory_mib'], 'docker_running': None},
+                    'containers': [], 'images': [], 'volumes': [], 'error': None,
+                    'kit_version': marker.read_text().strip()[:40] if marker.is_file() else 'dev',
+                    'updated_at': None, 'loading': True}
+            if not self.refreshing and time.monotonic() >= self.expires:
+                self.refreshing = True
+                threading.Thread(target=self._refresh, daemon=True).start()
+            data = dict(self.cached, refreshing=self.refreshing)
+        return self._with_storage(data)
+
+    def _refresh(self):
+        try:
+            if self.cached.get('loading'):
+                self._quick_collect()
+            data = self._collect()
+            if data['vm']['running'] and not data['error']:
+                self._metrics_collect()
+        except Exception:
+            # Preserve the last usable inventory and make failed refresh observable.
+            with self.lock:
+                self.cached = dict(self.cached, error='Не удалось обновить данные. Повторная проверка через 10 секунд.')
+                self.expires = time.monotonic() + 10
+        finally:
+            with self.lock:
+                self.refreshing = False
+
+    def _quick_collect(self):
+        kit = Kit(self.base)
+        if not kit.pid():
+            return
+        result = subprocess.run(kit.ssh(shlex.join(['docker', 'container', 'ls', '-a', '--no-trunc', '--format', PS_FORMAT])), capture_output=True, timeout=10, check=True)
+        containers = []
+        for raw in result.stdout.decode().splitlines():
+            if not raw:
+                continue
+            row = json.loads(raw)
+            row['protocol'] = row['protocol'] if row['protocol'] in ('http', 'https', 'tcp', 'udp') else 'unknown'
+            row['polling'] = row['polling'] if row['polling'] in ('true', 'false') else 'unknown'
+            row.update(metrics={key: None for key in ('CPUPerc', 'MemUsage', 'MemPerc', 'NetIO', 'BlockIO', 'PIDs')}, mounts=[], image_id='', started_at='')
+            containers.append(row)
+        with self.lock:
+            self.cached = dict(self.cached, containers=containers, loading=False, inventory_pending=True, metrics_ready=False, updated_at=int(time.time()))
+
+    def _collect(self):
+        kit = Kit(self.base)
+        data = {'vm': {'running': bool(kit.pid()), 'cpus': kit.config['cpus'],
+                       'memory_mib': kit.config['memory_mib']}, 'containers': [], 'images': [], 'volumes': [],
+                'updated_at': int(time.time()), 'error': None, 'metrics_ready': False}
+        marker = self.base / 'VERSION'
+        data['kit_version'] = marker.read_text().strip()[:40] if marker.is_file() else 'dev'
+        data['vm'].update(cpu_percent=None, memory_used_bytes=None, disk_used_bytes=None, disk_total_bytes=None, docker_version=None, docker_running=False)
+        if data['vm']['running']:
+            command = shlex.join(['docker', 'container', 'ls', '-a', '--no-trunc', '--format', PS_FORMAT])
+            command += " && printf '\\nHC_IMAGES\\n' && " + shlex.join(['docker', 'image', 'ls', '--all', '--no-trunc', '--format', IMAGE_FORMAT])
+            command += " && printf '\\nHC_VOLUMES\\n' && " + shlex.join(['docker', 'volume', 'ls', '--format', VOLUME_FORMAT])
+            command += " && printf '\\nHC_MOUNTS\\n' && docker container ls -aq | xargs -r " + shlex.join(['docker', 'inspect', '--format', MOUNT_FORMAT])
+            command += " && printf '\\nHC_STATS\\n'"
+            command += " && printf '\\nHC_MEMORY\\n' && awk '/MemTotal:/ {print $2}' /proc/meminfo"
+            command += " && printf '\\nHC_VERSION\\n' && docker info --format '{{.ServerVersion}}'"
+            command = "printf 'HC_HEALTH\\n'; awk '/MemTotal:/ {t=$2} /MemAvailable:/ {a=$2} END {print t; print a}' /proc/meminfo; head -n 1 /proc/stat; df -k /var/lib/docker | tail -n 1; printf '\\nHC_INVENTORY\\n'; " + command
+            try:
+                result = subprocess.run(kit.ssh(command), capture_output=True, timeout=15, check=False)
+                raw = result.stdout.decode('utf-8', 'replace')
+                if raw.startswith('HC_HEALTH\n'):
+                    health, raw = raw.split('\nHC_INVENTORY\n', 1)
+                    lines = health.splitlines()[1:]
+                    data['vm']['memory_total_bytes'] = int(lines[0]) * 1024
+                    data['vm']['memory_used_bytes'] = max(0, (int(lines[0]) - int(lines[1])) * 1024)
+                    ticks = [int(v) for v in lines[2].split()[1:9]]
+                    sample = (sum(ticks), ticks[3] + ticks[4])
+                    if self.cpu_sample and sample[0] > self.cpu_sample[0]:
+                        data['vm']['cpu_percent'] = round(100 * (1 - (sample[1] - self.cpu_sample[1]) / (sample[0] - self.cpu_sample[0])), 2)
+                    self.cpu_sample = sample
+                    disk = lines[3].split()
+                    data['vm'].update(disk_total_bytes=int(disk[1])*1024, disk_used_bytes=int(disk[2])*1024)
+                listing, rest = raw.split('\nHC_IMAGES\n', 1)
+                images, rest = rest.split('\nHC_VOLUMES\n', 1)
+                volumes, rest = rest.split('\nHC_MOUNTS\n', 1)
+                mounts, stats = rest.split('\nHC_STATS\n', 1)
+                stats, memory = stats.split('\nHC_MEMORY\n', 1)
+                if '\nHC_VERSION\n' in memory:
+                    memory, version = memory.split('\nHC_VERSION\n', 1)
+                    data['vm']['docker_version'] = version.strip()[:40]
+                data['vm']['docker_running'] = True
+                data['vm']['memory_total_bytes'] = int(memory.strip()) * 1024
+                details = {row['ID']: row for row in map(json.loads, mounts.splitlines()) if row}
+                usage = {row['ID']: row for row in map(json.loads, stats.splitlines()) if row}
+                with self.lock:
+                    previous = self.cached or {}
+                    old_usage = {c['ID']: c['metrics'] for c in previous.get('containers', [])}
+                    data['metrics_ready'] = bool(usage) or previous.get('metrics_ready', False)
+                    data['metrics_updated_at'] = previous.get('metrics_updated_at')
+                for raw in listing.splitlines():
+                    row = json.loads(raw)
+                    row['protocol'] = row['protocol'] if row['protocol'] in ('http', 'https', 'tcp', 'udp') else 'unknown'
+                    row['polling'] = row['polling'] if row['polling'] in ('true', 'false') else 'unknown'
+                    metric = next((value for ident, value in usage.items() if row['ID'].startswith(ident)), old_usage.get(row['ID'], {}))
+                    row['metrics'] = {key: metric.get(key) for key in ('CPUPerc', 'MemUsage', 'MemPerc', 'NetIO', 'BlockIO', 'PIDs')}
+                    detail = details.get(row['ID'], {})
+                    row['image_id'] = detail.get('image_id', '')
+                    row['started_at'] = detail.get('started_at', '')
+                    row['mounts'] = [{key: mount.get(key) for key in ('Type', 'Name', 'Destination', 'RW')} for mount in detail.get('mounts', [])]
+                    data['containers'].append(row)
+                data['images'] = [json.loads(row) for row in images.splitlines() if row]
+                data['volumes'] = [json.loads(row) for row in volumes.splitlines() if row]
+                for image in data['images']:
+                    image['containers'] = [c['Names'] for c in data['containers'] if c['image_id'] == image['ID']]
+                for volume in data['volumes']:
+                    volume['containers'] = [c['Names'] for c in data['containers'] if any(m['Type'] == 'volume' and m['Name'] == volume['Name'] for m in c['mounts'])]
+            except (subprocess.SubprocessError, OSError, ValueError, KeyError, IndexError):
+                data['error'] = 'Docker пока не отвечает. VM может загружаться.'
+        with self.lock:
+            self.cached, self.expires = data, time.monotonic() + 10
+        return self._with_storage(data)
+
+    def _metrics_collect(self):
+        kit = Kit(self.base)
+        if not kit.pid():
+            return
+        try:
+            result = subprocess.run(kit.ssh("docker stats --no-stream --format '{{json .}}'"), capture_output=True, timeout=15, check=True)
+            usage = [json.loads(line) for line in result.stdout.decode().splitlines() if line]
+            with self.lock:
+                data = dict(self.cached)
+                data['containers'] = [dict(c) for c in data['containers']]
+                for container in data['containers']:
+                    metric = next((m for m in usage if container['ID'].startswith(m['ID'])), {})
+                    container['metrics'] = {key: metric.get(key) for key in ('CPUPerc', 'MemUsage', 'MemPerc', 'NetIO', 'BlockIO', 'PIDs')}
+                data['metrics_ready'] = True
+                data['metrics_updated_at'] = int(time.time())
+                self.cached = data
+        except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+            with self.lock:
+                self.cached = dict(self.cached, metrics_error='Статистика пока недоступна. Список контейнеров загружен.')
 
     def _with_storage(self, data):
         with self.storage_lock:
@@ -121,7 +194,7 @@ class Dashboard:
                 image.update(storage['images'].get(image['ID'], {}))
                 image['size_bytes'] = bytes_value(image['Size'])
             missing = any(v['Name'] not in storage['volumes'] for v in data['volumes'])
-            if data['vm']['running'] and not self.storage_running and (time.monotonic() >= self.storage_due or missing and not storage['error']):
+            if data['vm']['running'] and not data.get('loading') and not data.get('inventory_pending') and not data.get('error') and not self.storage_running and (time.monotonic() >= self.storage_due or missing and not storage['error']):
                 self.storage_running = True
                 data['storage']['pending'] = True
                 threading.Thread(target=self._storage_update, daemon=True).start()
@@ -169,6 +242,8 @@ class Dashboard:
         if kind == 'container' and not re.fullmatch(r'[0-9a-f]{12,64}', target):
             raise ValueError('Некорректный ID контейнера.')
         snapshot = self.snapshot()
+        if snapshot.get('loading'):
+            raise ValueError('Дождитесь загрузки списка контейнеров.')
         if not snapshot['vm']['running'] or snapshot['error']:
             raise ValueError('Docker недоступен. Сначала запустите VM.')
         if kind in ('container', 'project'):
