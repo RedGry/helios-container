@@ -21,6 +21,7 @@ description: Подготовить или выпустить нативный �
 3. На FreeBSD 14 amd64 выполни команды из `CONTRIBUTING.md`, затем `python3 tools/release.py --check`, `python3 tools/release.py --binary native/target/release/helios-container-native` и `python3 tools/release.py --verify`.
 4. Комплект в `dist/` содержит ровно `helios-container-freebsd-amd64`, `helios-container-freebsd-amd64.sha256`, `VERSION`, `release-notes.md`. Updater ожидает первые три файла, SHA-256 в GNU-формате. Проверь FreeBSD ELF64 amd64 и `--build-version`. Не включай VM, QEMU, конфигурации, ключи, ссылки и временные файлы. Python нужен только для разработки, в установленном kit его нет.
 5. Проверь `scripts`, `release-check` и артефакт `release-preview` текущего коммита. Unit-тесты не заменяют установку и обновление на FreeBSD. Не останавливай рабочую VM ради проверки без разрешения.
+   Workflow `Release` проверяет новую установку под отдельным непривилегированным пользователем FreeBSD, запуск `hello-world` и Compose, затем останавливает тестовую VM. Стенд `native/tests/update.py` проверяет замену бинарника и сохранность данных при обновлении. Эти проверки выполняются в CI и не используют установленную VM пользователя.
 
 ## Черновик и публикация
 
