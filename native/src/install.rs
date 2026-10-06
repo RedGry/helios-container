@@ -93,6 +93,16 @@ fn copy_payload(source: &Path, unpacked: &Path, minimal: &Path) -> Result<()> {
     fs::copy(resolved, target)?;
     Ok(())
 }
+fn package_path_allowed(name: &str) -> bool {
+    let path = Path::new(name);
+    !path
+        .components()
+        .any(|part| matches!(part, std::path::Component::ParentDir))
+        && (!path.is_absolute()
+            || path
+                .strip_prefix("/")
+                .is_ok_and(|relative| relative.starts_with("usr/local")))
+}
 fn qemu(base: &Path) -> Result<()> {
     let target = base.join("qemu");
     no_links(&target.join(".complete"))?;
@@ -154,12 +164,8 @@ fn qemu(base: &Path) -> Result<()> {
         for archive in archives {
             let listing = output(Command::new("tar").arg("-tf").arg(&archive))?;
             for name in listing.lines() {
-                let p = Path::new(name);
-                if p.is_absolute()
-                    || p.components()
-                        .any(|x| matches!(x, std::path::Component::ParentDir))
-                {
-                    return Err("Небезопасный путь в пакете".into());
+                if !package_path_allowed(name) {
+                    return Err(format!("Небезопасный путь в пакете: {name}").into());
                 }
             }
             checked(
@@ -556,6 +562,24 @@ pub(super) fn run(args: &[String]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn package_paths_stay_in_local_prefix() {
+        for name in [
+            "+MANIFEST",
+            "usr/local/bin/qemu-img",
+            "/usr/local/bin/qemu-img",
+        ] {
+            assert!(package_path_allowed(name), "{name}");
+        }
+        for name in [
+            "../outside",
+            "/usr/local/../etc/passwd",
+            "/etc/passwd",
+            "/usr/local-other/bin/tool",
+        ] {
+            assert!(!package_path_allowed(name), "{name}");
+        }
+    }
     #[test]
     fn parent_traversal_rejected() {
         assert!(no_links(Path::new("/tmp/../tmp/kit")).is_err());
