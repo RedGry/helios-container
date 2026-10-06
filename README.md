@@ -7,22 +7,15 @@
 
 ## Быстрый старт
 
-Репозиторий приватный: сначала получите доступ к нему и GitHub-токен с правом чтения содержимого. Подключитесь к helios и введите токен без сохранения в истории команд:
+Подключитесь к helios и выполните **одну команду**:
 
 ```sh
-printf 'GitHub token: '; stty -echo; IFS= read -r GH_TOKEN; stty echo; printf '\n'; export GH_TOKEN
-```
-
-Затем выполните **одну команду установки**:
-
-```sh
-printf 'Authorization: Bearer %s\n' "$GH_TOKEN" | curl -fsSL -H @- -H 'Accept: application/vnd.github.raw+json' 'https://api.github.com/repos/RedGry/helios-container/contents/install.sh?ref=main' | sh && . "$HOME/.profile"
-unset GH_TOKEN
+curl -fsSL https://raw.githubusercontent.com/RedGry/helios-container/main/install.sh | sh && . "$HOME/.profile"
 ```
 
 Установщик скачает QEMU и Alpine Linux, настроит Docker, дождётся готовности VM и добавит команды в PATH. Первая установка занимает несколько минут.
 
-Если репозиторий уже клонирован на helios, достаточно `python3.11 installer.py && . "$HOME/.profile"` из его каталога. GitHub-токен установщику в этом случае не нужен.
+Если репозиторий уже клонирован на helios, достаточно `python3.11 installer.py && . "$HOME/.profile"` из его каталога.
 
 ```sh
 docker run --rm hello-world

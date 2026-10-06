@@ -9,14 +9,13 @@ Kit проверяется на helios с FreeBSD 14.x amd64. Нужны Python 
 Можно задать начальные ресурсы:
 
 ```sh
-printf 'Authorization: Bearer %s\n' "$GH_TOKEN" | curl -fsSL -H @- -H 'Accept: application/vnd.github.raw+json' 'https://api.github.com/repos/RedGry/helios-container/contents/install.sh?ref=main' | sh -s -- --memory 2048 --cpus 2 --disk 16
-unset GH_TOKEN
+curl -fsSL https://raw.githubusercontent.com/RedGry/helios-container/main/install.sh | sh -s -- --memory 2048 --cpus 2 --disk 16
 . "$HOME/.profile"
 ```
 
 Повторная установка сохраняет существующий диск, ключи и настройки; параметры `--memory`, `--cpus`, `--disk` задают только новую установку. Для существующей VM используйте `configure`. Автоматического обновления QEMU, Alpine и Docker нет.
 
-Для приватного репозитория сначала введите `GH_TOKEN`, как в README. Подойдёт fine-grained token с доступом к этому репозиторию и разрешением Contents: read. Установщик не сохраняет токен и удаляет его из окружения до запуска Python и QEMU. Из клона можно запустить `python3.11 installer.py --memory 2048 --cpus 2 --disk 16` без токена.
+Из клона можно запустить `python3.11 installer.py --memory 2048 --cpus 2 --disk 16`.
 
 ## PATH
 

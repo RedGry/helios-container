@@ -22,17 +22,9 @@ mkdir -p "$HOME/.local"
 hc_temp=$(mktemp -d "$HOME/.local/helios-container-install.XXXXXXXX")
 case "$hc_temp" in "$HOME"/.local/helios-container-install.*) ;; *) exit 1 ;; esac
 trap 'rm -rf -- "$hc_temp"' EXIT HUP INT TERM
-if [ -n "${GH_TOKEN:-}" ]; then
-    printf 'Authorization: Bearer %s\n' "$GH_TOKEN" | \
-        curl -fL --retry 3 --connect-timeout 15 --max-time 120 -H @- \
-        https://api.github.com/repos/RedGry/helios-container/tarball/main \
-        -o "$hc_temp/source.tar.gz"
-else
-    curl -fL --retry 3 --connect-timeout 15 --max-time 120 \
-        https://codeload.github.com/RedGry/helios-container/tar.gz/refs/heads/main \
-        -o "$hc_temp/source.tar.gz"
-fi
-unset GH_TOKEN
+curl -fL --retry 3 --connect-timeout 15 --max-time 120 \
+    https://codeload.github.com/RedGry/helios-container/tar.gz/refs/heads/main \
+    -o "$hc_temp/source.tar.gz"
 tar -xzf "$hc_temp/source.tar.gz" -C "$hc_temp"
 hc_source=''
 for candidate in "$hc_temp"/*/installer.py; do
