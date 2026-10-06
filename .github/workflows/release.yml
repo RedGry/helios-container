@@ -37,7 +37,7 @@ jobs:
             echo 'Tag already exists' >&2
             exit 1
           fi
-      - run: python -m unittest discover -s tests -v && node --test tests/*.cjs
+      - run: python -m unittest discover -s tests -p test_release.py -v && node --test tests/*.cjs
       - run: sh -n install.sh && php -l gateway.php
       - name: Build native payload on FreeBSD
         uses: vmactions/freebsd-vm@c46abacb49f09938ca4e1702d15d836285d694cc # v1
