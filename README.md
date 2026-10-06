@@ -60,6 +60,8 @@ https://se.ifmo.ru/~USERNAME/helios-container/index.php/vm/8080/
 
 ## Управление
 
+Начат постепенный перенос CLI на Rust. Нативный runtime для существующей установки и команда отката описаны в [native/README.md](native/README.md). Веб-агент и установщик пока сохраняют Python.
+
 ```sh
 helios-container status
 helios-container stop
