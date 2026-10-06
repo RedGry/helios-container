@@ -49,8 +49,13 @@ jobs:
             sh native/build.sh
             python3.11 native/tests/lifecycle.py native/target/release/helios-container-native
             python3.11 native/tests/gateway.py native/target/release/helios-container-native
+            python3.11 native/tests/update.py native/target/release/helios-container-native
             python3.11 tools/release.py --binary native/target/release/helios-container-native
             python3.11 tools/release.py --verify
+            pw useradd helios-release-test -m -d /var/helios-release-test -s /bin/sh
+            install -m 755 dist/helios-container-freebsd-amd64 /var/helios-release-test/helios-container-native
+            install -m 644 dist/VERSION /var/helios-release-test/VERSION
+            su -l helios-release-test -c './helios-container-native install --cpus 8 --no-profile && .local/bin/docker run --rm hello-world && .local/bin/docker compose version && .local/bin/helios-container stop'
       - name: Create draft only
         env:
           GH_TOKEN: ${{ github.token }}
