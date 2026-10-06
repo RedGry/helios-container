@@ -9,10 +9,8 @@ PHP-шлюз остаётся в `~/public_html/helios-container`. Универ�
 Нужны FreeBSD 14 amd64, Rust, Cargo и системный C-компилятор:
 
 ```sh
-cd native
-cargo test --locked
-cargo build --release --locked
-./target/release/helios-container-native install
+sh native/build.sh
+./native/target/release/helios-container-native install
 . "$HOME/.profile"
 ```
 

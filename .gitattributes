@@ -3,3 +3,9 @@
 *.md text eol=lf
 *.php text eol=lf
 *.htaccess text eol=lf
+*.rs text eol=lf
+*.toml text eol=lf
+*.lock text eol=lf
+*.yml text eol=lf
+*.cjs text eol=lf
+VERSION text eol=lf

@@ -25,6 +25,7 @@ if [ "${1:-}" = --source ]; then
         export PATH
     fi
     (cd "$hc_source" && cargo build --release --locked)
+    cp "$hc_source/../VERSION" "$hc_source/target/release/VERSION"
     "$hc_source/target/release/helios-container-native" install "$@"
 else
     for hc_asset in helios-container-freebsd-amd64 helios-container-freebsd-amd64.sha256 VERSION; do

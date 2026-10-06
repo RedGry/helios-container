@@ -1,3 +1,11 @@
 __pycache__/
 *.pyc
 .venv/
+/dist/
+/config.json
+/web.json
+/vm/
+/qemu/
+/.ssh/
+.env
+*.before-rust

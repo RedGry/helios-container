@@ -6,5 +6,8 @@ if [ "$(uname -s)" != FreeBSD ] || [ "$(uname -m)" != amd64 ]; then
 fi
 cd "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 cargo test --locked
+cargo fmt --check
 cargo build --release --locked
+[ "$(./target/release/helios-container-native --build-version)" = "$(cat ../VERSION)" ]
+cp ../VERSION target/release/VERSION
 printf '\nГотовый бинарник: %s/target/release/helios-container-native\n' "$PWD"

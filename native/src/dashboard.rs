@@ -121,6 +121,9 @@ fn ssh(kit: &Kit, command: &str, seconds: u64, limit: usize) -> Result<String> {
 struct Cache {
     value: Option<Value>,
     due: Instant,
+    full_due: Instant,
+    metrics_due: Instant,
+    metrics_running: bool,
     refreshing: bool,
     cpu: Option<(u64, u64)>,
 }
@@ -144,6 +147,9 @@ impl Dashboard {
             cache: Mutex::new(Cache {
                 value: None,
                 due: Instant::now(),
+                full_due: Instant::now(),
+                metrics_due: Instant::now(),
+                metrics_running: false,
                 refreshing: false,
                 cpu: None,
             }),
@@ -226,15 +232,30 @@ impl Dashboard {
                     }
                 }
             }
-            let value = self.collect(&kit)?;
+            let full = {
+                let cache = self.cache.lock().unwrap();
+                loading || Instant::now() >= cache.full_due
+            };
+            let mut value = if full {
+                self.collect(&kit)?
+            } else {
+                self.collect_warm(&kit)?
+            };
             let metrics = value["vm"]["running"] == true && value["error"].is_null();
             {
                 let mut cache = self.cache.lock().unwrap();
+                if full {
+                    cache.full_due = Instant::now()
+                        + Duration::from_secs(if value["error"].is_null() { 30 } else { 10 });
+                }
+                // A parallel metrics worker may have finished while inventory was over SSH.
+                if let Some(latest) = cache.value.as_ref() {
+                    preserve_newer_metrics(&mut value, latest);
+                }
                 cache.value = Some(value);
-                cache.due = Instant::now() + Duration::from_secs(10);
             }
             if metrics {
-                self.metrics(&kit);
+                self.start_metrics(kit);
             }
             Ok(())
         })();
@@ -245,8 +266,80 @@ impl Dashboard {
                     json!("Не удалось обновить данные. Повторная проверка через 10 секунд.");
             }
             cache.due = Instant::now() + Duration::from_secs(10);
+        } else {
+            // Slow statistics have their own single worker and never delay state refresh.
+            cache.due = Instant::now() + Duration::from_secs(2);
         }
         cache.refreshing = false;
+    }
+    fn collect_warm(&self, kit: &Kit) -> Result<Value> {
+        let previous = self
+            .cache
+            .lock()
+            .unwrap()
+            .value
+            .clone()
+            .unwrap_or(Value::Null);
+        if kit.pid().is_none() {
+            return self.collect(kit);
+        }
+        let command=format!("printf 'HC_HEALTH\\n'; awk '/MemTotal:/ {{t=$2}} /MemAvailable:/ {{a=$2}} END {{print t; print a}}' /proc/meminfo; head -n 1 /proc/stat; df -k /var/lib/docker | tail -n 1; printf '\\nHC_INVENTORY\\n'; {}",cmd(&["docker","container","ls","-a","--no-trunc","--format",PS]));
+        let raw = ssh(kit, &command, 10, 4 * 1024 * 1024)?;
+        let (health, listing) = raw.split_once("\nHC_INVENTORY\n").ok_or("Нет данных VM")?;
+        let mut data = previous.clone();
+        let missing = merge_warm_rows(&mut data, rows(listing)?);
+        self.apply_health(&mut data, health)?;
+        data["vm"]["running"] = json!(true);
+        data["vm"]["docker_running"] = json!(true);
+        data["error"] = Value::Null;
+        data["loading"] = json!(false);
+        data["updated_at"] = json!(now());
+        if missing {
+            self.cache.lock().unwrap().full_due = Instant::now();
+        }
+        Ok(data)
+    }
+    fn apply_health(&self, data: &mut Value, health: &str) -> Result<()> {
+        let lines: Vec<_> = health.lines().skip(1).collect();
+        let total = lines.first().ok_or("Нет памяти")?.trim().parse::<u64>()?;
+        let available = lines.get(1).ok_or("Нет памяти")?.trim().parse::<u64>()?;
+        data["vm"]["memory_total_bytes"] = json!(total * 1024);
+        data["vm"]["memory_used_bytes"] = json!(total.saturating_sub(available) * 1024);
+        let ticks: Vec<u64> = lines
+            .get(2)
+            .ok_or("Нет CPU")?
+            .split_whitespace()
+            .skip(1)
+            .take(8)
+            .map(str::parse)
+            .collect::<std::result::Result<_, _>>()?;
+        if ticks.len() >= 5 {
+            let sample = (ticks.iter().sum::<u64>(), ticks[3] + ticks[4]);
+            let mut cache = self.cache.lock().unwrap();
+            if let Some(old) = cache.cpu {
+                if sample.0 > old.0 {
+                    data["vm"]["cpu_percent"] = json!(
+                        (10000.
+                            * (1.
+                                - sample.1.saturating_sub(old.1) as f64
+                                    / (sample.0 - old.0) as f64))
+                            .round()
+                            / 100.
+                    );
+                }
+            }
+            cache.cpu = Some(sample);
+        }
+        let disk: Vec<_> = lines
+            .get(3)
+            .ok_or("Нет диска")?
+            .split_whitespace()
+            .collect();
+        data["vm"]["disk_total_bytes"] =
+            json!(disk.get(1).ok_or("Нет диска")?.parse::<u64>()? * 1024);
+        data["vm"]["disk_used_bytes"] =
+            json!(disk.get(2).ok_or("Нет диска")?.parse::<u64>()? * 1024);
+        Ok(())
     }
     fn collect(&self, kit: &Kit) -> Result<Value> {
         let mut data = json!({"vm":{"running":kit.pid().is_some(),"cpus":kit.c["cpus"],"memory_mib":kit.c["memory_mib"],"cpu_percent":null,"memory_used_bytes":null,"disk_used_bytes":null,"disk_total_bytes":null,"docker_version":null,"docker_running":false},"containers":[],"images":[],"volumes":[],"updated_at":now(),"error":null,"metrics_ready":false,"kit_version":self.version()});
@@ -380,6 +473,21 @@ impl Dashboard {
         }
         Ok(data)
     }
+    fn start_metrics(self: &Arc<Self>, kit: Kit) {
+        let mut cache = self.cache.lock().unwrap();
+        if cache.metrics_running || Instant::now() < cache.metrics_due {
+            return;
+        }
+        cache.metrics_running = true;
+        drop(cache);
+        let owner = Arc::clone(self);
+        thread::spawn(move || {
+            owner.metrics(&kit);
+            let mut cache = owner.cache.lock().unwrap();
+            cache.metrics_running = false;
+            cache.metrics_due = Instant::now() + Duration::from_secs(5);
+        });
+    }
     fn metrics(&self, kit: &Kit) {
         let result = ssh(
             kit,
@@ -390,8 +498,16 @@ impl Dashboard {
         .and_then(|raw| rows(&raw));
         let mut cache = self.cache.lock().unwrap();
         let data = cache.value.as_mut().unwrap();
+        // A stop may have completed while stats was running. Do not revive stale metrics.
+        if data["vm"]["running"] != true || data["vm"]["docker_running"] != true {
+            return;
+        }
         if let Ok(usage) = result {
             for c in data["containers"].as_array_mut().unwrap() {
+                if c["State"] != "running" {
+                    c["metrics"] = metric(&Value::Null);
+                    continue;
+                }
                 c["metrics"] = usage
                     .iter()
                     .find(|m| s(&c["ID"]).starts_with(s(&m["ID"])) && !s(&m["ID"]).is_empty())
@@ -400,6 +516,7 @@ impl Dashboard {
             }
             data["metrics_ready"] = json!(true);
             data["metrics_updated_at"] = json!(now());
+            data["metrics_error"] = Value::Null;
         } else {
             data["metrics_error"] =
                 json!("Статистика пока недоступна. Список контейнеров загружен.");
@@ -658,7 +775,14 @@ impl Dashboard {
                 json!("Операция не завершилась. Обновите состояние VM и Docker.")
             };
         }
-        self.cache.lock().unwrap().due = Instant::now();
+        {
+            let mut cache = self.cache.lock().unwrap();
+            cache.due = Instant::now();
+            cache.metrics_due = Instant::now();
+            if ["image", "volume", "vm", "engine"].contains(&kind.as_str()) {
+                cache.full_due = Instant::now();
+            }
+        }
         self.storage.lock().unwrap().due = Instant::now();
     }
     pub fn job(&self, token: &str) -> Result<Value> {
@@ -704,6 +828,79 @@ fn normalize(row: &mut Value) {
     if !["true", "false"].contains(&s(&row["polling"])) {
         row["polling"] = json!("unknown");
     }
+}
+fn preserve_newer_metrics(data: &mut Value, latest: &Value) {
+    if data["vm"]["running"] != true || data["vm"]["docker_running"] != true {
+        return;
+    }
+    if latest["metrics_updated_at"].as_u64().unwrap_or(0)
+        <= data["metrics_updated_at"].as_u64().unwrap_or(0)
+    {
+        return;
+    }
+    if let Some(containers) = data["containers"].as_array_mut() {
+        for container in containers {
+            container["metrics"] = if container["State"] == "running" {
+                latest["containers"]
+                    .as_array()
+                    .and_then(|cs| cs.iter().find(|c| c["ID"] == container["ID"]))
+                    .map(|c| metric(&c["metrics"]))
+                    .unwrap_or_else(|| metric(&Value::Null))
+            } else {
+                metric(&Value::Null)
+            };
+        }
+    }
+    for key in ["metrics_ready", "metrics_updated_at", "metrics_error"] {
+        data[key] = latest[key].clone();
+    }
+}
+// Refresh process state without throwing away selected metadata or waiting for inspect.
+// Unknown IDs trigger a full metadata pass and disable resource deletion until it finishes.
+fn merge_warm_rows(data: &mut Value, mut containers: Vec<Value>) -> bool {
+    let previous = data["containers"].as_array().cloned().unwrap_or_default();
+    let mut missing = false;
+    for row in &mut containers {
+        normalize(row);
+        if let Some(old) = previous.iter().find(|old| old["ID"] == row["ID"]) {
+            for key in ["mounts", "image_id", "started_at"] {
+                row[key] = old[key].clone();
+            }
+            row["metrics"] = if row["State"] == "running" {
+                metric(&old["metrics"])
+            } else {
+                metric(&Value::Null)
+            };
+            if s(&row["image_id"]).is_empty() {
+                missing = true;
+            }
+        } else {
+            missing = true;
+            row["mounts"] = json!([]);
+            row["image_id"] = json!("");
+            row["started_at"] = json!("");
+            row["metrics"] = metric(&Value::Null);
+        }
+    }
+    for image in data["images"].as_array_mut().unwrap() {
+        image["containers"] = json!(containers
+            .iter()
+            .filter(|c| c["image_id"] == image["ID"])
+            .map(|c| c["Names"].clone())
+            .collect::<Vec<_>>());
+    }
+    for volume in data["volumes"].as_array_mut().unwrap() {
+        volume["containers"] = json!(containers
+            .iter()
+            .filter(|c| c["mounts"].as_array().is_some_and(|ms| ms
+                .iter()
+                .any(|m| m["Type"] == "volume" && m["Name"] == volume["Name"])))
+            .map(|c| c["Names"].clone())
+            .collect::<Vec<_>>());
+    }
+    data["containers"] = json!(containers);
+    data["inventory_pending"] = json!(missing);
+    missing
 }
 fn preserve_inventory(data: &mut Value, previous: &Value) {
     for key in [
@@ -764,6 +961,9 @@ fn select_action(data: &Value, payload: &Value) -> Result<(Vec<String>, Option<S
     }
     if data["loading"] == true {
         return Err("Дождитесь загрузки списка контейнеров.".into());
+    }
+    if data["inventory_pending"] == true && ["image", "volume"].contains(&kind) {
+        return Err("Дождитесь загрузки сведений о контейнерах.".into());
     }
     if data["vm"]["running"] != true || !data["error"].is_null() {
         return Err("Docker недоступен. Сначала запустите VM.".into());
@@ -875,6 +1075,41 @@ fn select_action(data: &Value, payload: &Value) -> Result<(Vec<String>, Option<S
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn state_refresh_preserves_parallel_metrics_without_reviving_stopped_rows() {
+        let id = "a".repeat(64);
+        let latest = json!({"metrics_updated_at":20,"metrics_ready":true,"containers":[{"ID":id,"metrics":{"CPUPerc":"12%"}}]});
+        let mut data = json!({"vm":{"running":true,"docker_running":true},"metrics_updated_at":10,"containers":[{"ID":id,"State":"running","metrics":{"CPUPerc":"1%"}}]});
+        preserve_newer_metrics(&mut data, &latest);
+        assert_eq!(data["containers"][0]["metrics"]["CPUPerc"], "12%");
+        assert_eq!(data["metrics_updated_at"], 20);
+        data["metrics_updated_at"] = json!(10);
+        data["containers"][0]["State"] = json!("exited");
+        preserve_newer_metrics(&mut data, &latest);
+        assert!(data["containers"][0]["metrics"]["CPUPerc"].is_null());
+    }
+    #[test]
+    fn cheap_refresh_keeps_metadata_updates_references_and_marks_unknown_ids() {
+        let id = "a".repeat(64);
+        let image = format!("sha256:{}", "b".repeat(64));
+        let old = json!({"ID":id,"Names":"demo","State":"running","image_id":image,"started_at":"started","mounts":[{"Type":"volume","Name":"db","Destination":"/data","RW":true}],"metrics":{"CPUPerc":"12%","MemUsage":"12MiB / 4GiB"}});
+        let mut data = json!({"containers":[old],"images":[{"ID":image,"containers":["demo"]}],"volumes":[{"Name":"db","containers":["demo"]}]});
+        assert!(!merge_warm_rows(
+            &mut data,
+            vec![json!({"ID":id,"Names":"demo","State":"exited"})]
+        ));
+        assert_eq!(data["containers"][0]["started_at"], "started");
+        assert_eq!(data["containers"][0]["image_id"], image);
+        assert_eq!(data["containers"][0]["mounts"][0]["Name"], "db");
+        assert!(data["containers"][0]["metrics"]["CPUPerc"].is_null());
+        assert_eq!(data["volumes"][0]["containers"], json!(["demo"]));
+        assert!(merge_warm_rows(
+            &mut data,
+            vec![json!({"ID":"c".repeat(64),"Names":"new","State":"running"})]
+        ));
+        assert_eq!(data["inventory_pending"], true);
+        assert_eq!(data["volumes"][0]["containers"], json!([]));
+    }
     fn inventory() -> Value {
         json!({"vm":{"running":true,"cpus":4,"memory_mib":4096},"error":null,"containers":[{"ID":"a".repeat(64),"Names":"demo-1","project":"p'; touch /tmp/bad","State":"exited","metrics":{"CPUPerc":"2.34%","MemUsage":"12MiB / 4GiB"}}],"images":[],"volumes":[]})
     }

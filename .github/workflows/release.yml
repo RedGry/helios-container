@@ -1,0 +1,58 @@
+name: Release
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  draft:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Refuse duplicate version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          python tools/release.py --check
+          version=$(cat VERSION)
+          gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '.[].tag_name' > /tmp/helios-release-tags
+          if grep -Fx "v$version" /tmp/helios-release-tags; then
+            echo 'Release already exists' >&2
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v$version" --jq '.[].ref' > /tmp/helios-git-tags
+          if grep -Fx "refs/tags/v$version" /tmp/helios-git-tags; then
+            echo 'Tag already exists' >&2
+            exit 1
+          fi
+      - run: python -m unittest discover -s tests -v && node --test tests/*.cjs
+      - run: sh -n install.sh && php -l gateway.php
+      - name: Build native payload on FreeBSD
+        uses: vmactions/freebsd-vm@c46abacb49f09938ca4e1702d15d836285d694cc # v1
+        with:
+          release: '14.5'
+          prepare: pkg install -y rust python311
+          run: |
+            set -eu
+            sh native/build.sh
+            python3.11 native/tests/lifecycle.py native/target/release/helios-container-native
+            python3.11 native/tests/gateway.py native/target/release/helios-container-native
+            python3.11 tools/release.py --binary native/target/release/helios-container-native
+            python3.11 tools/release.py --verify
+      - name: Create draft only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          version=$(cat VERSION)
+          python tools/release.py --verify
+          gh release create "v$version" --target "$GITHUB_SHA" --draft --title "$version" --notes-file dist/release-notes.md dist/helios-container-freebsd-amd64 dist/helios-container-freebsd-amd64.sha256 dist/VERSION
