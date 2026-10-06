@@ -38,7 +38,7 @@ jobs:
             python3.11 -m unittest discover -s tests -v
             python3.11 tools/release.py --binary native/target/release/helios-container-native
             python3.11 tools/release.py --verify
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-preview
           path: dist/
