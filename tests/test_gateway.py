@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -98,3 +99,31 @@ class GatewayTests(unittest.TestCase):
         for value in ('https://example.com', 'host:22', '65536', '3000:80', '1,2,3,4,5,6,7,8,9'):
             with self.assertRaises(ValueError): gateway.parse_ports(value)
         self.assertEqual(gateway.parse_ports('8080, 8080 host:3000'), [{'kind': 'vm', 'port': 8080}, {'kind': 'host', 'port': 3000}])
+
+
+class RemovalTests(unittest.TestCase):
+    def test_removal_preserves_user_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory); base = home / 'kit'; base.mkdir()
+            root = home / 'public_html/helios-container'; root.mkdir(parents=True)
+            (root / 'index.php').write_text('<?php ' + gateway.MARKER)
+            (root / '.htaccess').write_text('# helios-container managed web methods')
+            (root / 'my-page.html').write_text('user content')
+            gateway.save(base, {'directory': str(root)})
+            with patch.object(gateway.Path, 'home', return_value=home), patch.object(gateway, 'stop_agent'):
+                gateway.manage(SimpleNamespace(base=base), ['remove'])
+            self.assertEqual((root / 'my-page.html').read_text(), 'user content')
+            self.assertFalse((root / 'index.php').exists())
+            self.assertFalse((root / '.htaccess').exists())
+
+    def test_removal_refuses_foreign_htaccess(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory); base = home / 'kit'; base.mkdir()
+            root = home / 'public_html/helios-container'; root.mkdir(parents=True)
+            (root / 'index.php').write_text('<?php ' + gateway.MARKER)
+            (root / '.htaccess').write_text('user settings')
+            gateway.save(base, {'directory': str(root)})
+            with patch.object(gateway.Path, 'home', return_value=home), patch.object(gateway, 'stop_agent'):
+                with self.assertRaises(RuntimeError): gateway.manage(SimpleNamespace(base=base), ['remove'])
+            self.assertEqual((root / '.htaccess').read_text(), 'user settings')
+            self.assertTrue((root / 'index.php').exists())

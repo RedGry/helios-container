@@ -146,9 +146,15 @@ def manage(kit, argv):
         index = root / 'index.php'
         if index.is_symlink() or (index.exists() and MARKER not in index.read_text()):
             raise RuntimeError('index.php уже существует и не принадлежит kit.')
+        access = root / '.htaccess'
+        access_marker = '# helios-container managed web methods'
+        if access.is_symlink() or (access.exists() and access_marker not in access.read_text()):
+            raise RuntimeError('.htaccess уже существует и не принадлежит kit.')
         template = (base / 'gateway.php').read_text()
         index.write_text(template.replace('__HC_PORT__', str(state['agent_port'])).replace('__HC_BRIDGE__', state['bridge_key']))
         index.chmod(0o644)
+        access.write_text((base / 'gateway.htaccess').read_text())
+        access.chmod(0o644)
         ensure_agent(base)
     elif args.action == 'start':
         ensure_agent(base)
@@ -164,8 +170,12 @@ def manage(kit, argv):
         index = root / 'index.php'
         if index.is_symlink() or (index.exists() and MARKER not in index.read_text()):
             raise RuntimeError('Отказ удаления: index.php не принадлежит kit.')
+        access = root / '.htaccess'
+        if access.is_symlink() or (access.exists() and '# helios-container managed web methods' not in access.read_text()):
+            raise RuntimeError('Отказ удаления: .htaccess не принадлежит kit.')
         stop_agent(base)
         index.unlink(missing_ok=True)
+        access.unlink(missing_ok=True)
         if root.exists() and not any(root.iterdir()):
             root.rmdir()
         for name in ('web.json', 'web.pid', 'web.log'):

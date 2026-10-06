@@ -224,7 +224,7 @@ def main():
         qemu_payload(base)
         guest(base, args.disk)
     source = Path(__file__).resolve().parent
-    for name in ('runtime.py', 'profile.py', 'gateway.py', 'gateway.php', 'README.md'):
+    for name in ('runtime.py', 'profile.py', 'gateway.py', 'gateway.php', 'gateway.htaccess', 'README.md'):
         if (source / name).resolve() != (base / name).resolve():
             shutil.copy2(source / name, base / name)
     if not args.no_launchers:

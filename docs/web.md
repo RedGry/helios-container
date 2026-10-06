@@ -11,7 +11,7 @@ docker run -d --name web --restart unless-stopped -p 8080:80 nginx:alpine
 helios-container web install
 ```
 
-Команда создаёт только `~/public_html/helios-container/index.php`. Ваши существующие страницы и корневой `index.html` сохраняются. Занятый каталог шлюза установщик не перезаписывает. Проверка исполнения PHP проходит до размещения рабочего шлюза.
+Команда создаёт `index.php` и `.htaccess` в `~/public_html/helios-container`. `.htaccess` разрешает HTTP-методы REST API только в каталоге шлюза. Ваши существующие страницы и корневой `index.html` сохраняются. Занятый каталог шлюза установщик не перезаписывает. Проверка исполнения PHP проходит до размещения рабочего шлюза.
 
 Установщик выводит страницу и **приватную ссылку управления**. Ссылка доступна повторно через:
 
@@ -70,8 +70,16 @@ const result = await response.json();
 - `multipart/form-data` не поддерживается: PHP разбирает такое тело до выполнения скрипта. Для API используйте JSON или `application/octet-stream`.
 - Таймаут backend — 15 секунд. PHP ждёт агент до 20 секунд. Это шлюз для обычного студенческого API, а не длительных сборок и задач.
 - Одновременно агент обслуживает до 8 запросов. Его память и CPU расходуют лимиты владельца kit. PHP обслуживается общей инфраструктурой хостинга.
-- Нужен PHP ≥ 8 с `allow_url_fopen`, поддержка `PATH_INFO`, доступ PHP к loopback helios и утилита `sockstat`. PHP-cURL не требуется. На helios эти возможности проверены.
+- Нужен PHP ≥ 8 с `allow_url_fopen`, поддержка `PATH_INFO`, доступ PHP к loopback helios, разрешение AuthConfig для `.htaccess` и утилита `sockstat`. PHP-cURL не требуется. На helios эти возможности проверены.
 - Работающий backend и агент должны оставаться запущенными. Агент переживает выход из SSH. После перезапуска сервера вызов `docker`/`helios-container start` поднимет агент, если шлюз установлен. Отдельно можно выполнить `web start`.
+
+## WebSocket
+
+Через текущий хостинг `se.ifmo.ru/~USERNAME/` WebSocket не работает. Проверка на helios показала, что внешний nginx не передаёт `Upgrade` и `Connection`, а Apache не загрузил `mod_proxy`, `mod_proxy_http` и `mod_proxy_wstunnel`. Установка пакетов в HOME и `.htaccess` не меняют конфигурацию внешнего nginx и не включают серверные модули Apache.
+
+Для стандартного WSS по этому адресу администраторы должны настроить прохождение WebSocket через nginx и reverse proxy Apache до вашего backend. Это также потребует отдельного маршрута, обходящего PHP-шлюз. [nginx: WebSocket proxying](https://nginx.org/en/docs/http/websocket.html), [Apache: WebSocket tunneling](https://httpd.apache.org/docs/2.4/mod/mod_proxy_wstunnel.html).
+
+Без этих изменений можно использовать отдельный доступный WSS-шлюз на другом домене или HTTP polling, если приложение его поддерживает. Например, [Socket.IO поддерживает транспорт polling](https://socket.io/docs/v4/client-options/#transports), но это не замена произвольному WebSocket-серверу. Текущие таймауты и лимиты HTTP-шлюза сохраняются. Ответ на polling-запрос должен приходить быстрее 15 секунд.
 
 ## Управление и удаление
 
@@ -82,7 +90,7 @@ helios-container web start
 helios-container web remove
 ```
 
-`stop` отключает агент. Страница сохранится, API вернёт ошибку недоступности. `remove` удаляет только PHP-страницу шлюза, его настройки, процесс и лог. Frontend, VM, контейнеры и ранее созданные loopback-пробросы сохраняются. Полное `helios-container uninstall --yes` также убирает установленный шлюз.
+`stop` отключает агент. Страница сохранится, API вернёт ошибку недоступности. `remove` удаляет только PHP-страницу и `.htaccess` шлюза, его настройки, процесс и лог. Frontend, VM, контейнеры и ранее созданные loopback-пробросы сохраняются. Полное `helios-container uninstall --yes` также убирает установленный шлюз.
 
 Лог запуска — `~/.local/helios-container/web.log`. Настройки и приватная ссылка — в `web.json` внутри того же приватного каталога. Не копируйте его в `public_html`.
 
