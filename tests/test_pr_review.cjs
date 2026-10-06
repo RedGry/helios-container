@@ -4,17 +4,17 @@ const {eligible, actionUpdate, run} = require('../tools/pr-review.cjs');
 
 function pr(overrides = {}) {
   return {number: 1, state: 'open', draft: false, changed_files: 1,
-    user: {login: 'developer'}, base: {ref: 'develop', repo: {full_name: 'owner/repo'}},
+    user: {login: 'developer'}, base: {ref: 'main', repo: {full_name: 'owner/repo'}},
     head: {ref: 'feature/docs', sha: 'tested', repo: {full_name: 'owner/repo'}}, ...overrides};
 }
 const docs = [{filename: 'docs/guide.md', status: 'modified'}];
 
-test('only existing documentation in same-repository develop PRs is approved', () => {
+test('only existing documentation in same-repository main PRs is approved', () => {
   assert.equal(eligible(pr(), docs), true);
   for (const change of [{draft: true}, {changed_files: 2},
     {head: {ref: 'release/0.1.0', repo: {full_name: 'owner/repo'}}},
     {head: {ref: 'feature/docs', repo: {full_name: 'other/repo'}}},
-    {base: {ref: 'main', repo: {full_name: 'owner/repo'}}}]) {
+    {base: {ref: 'develop', repo: {full_name: 'owner/repo'}}}]) {
     assert.equal(eligible(pr(change), docs), false);
   }
   for (const filename of ['runtime.py', 'VERSION', 'CHANGELOG.md', 'CONTRIBUTING.md', '.agents/skills/release/SKILL.md']) {

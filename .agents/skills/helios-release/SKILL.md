@@ -9,7 +9,7 @@ description: Подготовить нативный релиз Helios Container
 
 Проверь корень Git и remote. Родительский каталог содержит частные SSH-помощники и не является источником релиза. Прочитай `CONTRIBUTING.md`, `CHANGELOG.md`, `VERSION`, `native/Cargo.toml`, `native/src/update.rs`, `tools/release.py` и `.github/workflows/release.yml`.
 
-`main` — стабильная ветка, `develop` — интеграция. Используй `feature/<имя>`, `bugfix/<имя>` и `release/X.Y.Z`. Не используй `codex/`, не переноси чужие незакоммиченные изменения.
+`main` — стабильная и целевая ветка PR. Используй `feature/<имя>`, `bugfix/<имя>` и `release/X.Y.Z`; `develop` не используется. Следуй `AGENTS.md`. Не используй `codex/`, не переноси чужие незакоммиченные изменения.
 
 ## Подготовка
 

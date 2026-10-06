@@ -15,7 +15,7 @@ function actionUpdate(file) {
 
 function eligible(pr, files) {
   if (pr.draft || !files.length || files.length !== pr.changed_files || pr.head.repo?.full_name !== pr.base.repo.full_name) return false;
-  if (pr.base.ref !== 'develop' || pr.head.ref.startsWith('release/')) return false;
+  if (pr.base.ref !== 'main' || pr.head.ref.startsWith('release/')) return false;
   const docs = files.every(file => file.status === 'modified' &&
     (file.filename === 'README.md' || /^docs\/.*\.md$/.test(file.filename)));
   return docs || (pr.user.login === 'dependabot[bot]' && files.every(actionUpdate));
@@ -30,7 +30,7 @@ async function run({github, context, core}) {
     await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, {...repo, commit_sha: ci.head_sha, per_page: 100});
   for (const item of associated) {
     const {data: pr} = await github.rest.pulls.get({...repo, pull_number: item.number});
-    if (pr.state !== 'open' || pr.head.sha !== ci.head_sha || !['main', 'develop'].includes(pr.base.ref)) continue;
+    if (pr.state !== 'open' || pr.head.sha !== ci.head_sha || pr.base.ref !== 'main') continue;
     const params = {...repo, pull_number: pr.number};
     const files = await github.paginate(github.rest.pulls.listFiles, {...params, per_page: 100});
     const reviews = await github.paginate(github.rest.pulls.listReviews, {...params, per_page: 100});
