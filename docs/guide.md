@@ -45,6 +45,8 @@ docker compose -f /workspace/my-app/compose.yaml logs -f
 
 Пути `./data` в Compose отсчитываются от файла Compose **внутри VM**. Домашняя папка helios автоматически не подключается. Для постоянных данных удобны Docker volumes. Они хранятся на диске VM и переживают её перезапуск.
 
+`compose up -d` подтверждает запуск контейнеров, но не готовность API. Для приложений с долгим стартом задайте `healthcheck`, используйте `depends_on` с `condition: service_healthy` и запускайте `compose up --wait`. Под TCG Java-приложения могут загружаться несколько минут. До готовности backend веб-шлюз может возвращать 502 или 504, его таймаут остаётся 15 секунд.
+
 ```sh
 helios-container download /workspace/my-app ./backup
 ```
