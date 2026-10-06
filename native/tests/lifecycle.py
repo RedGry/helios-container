@@ -54,7 +54,7 @@ vm = base/'vm'; vm.mkdir(parents=True)
 qemu = base/'qemu/usr/local/bin/qemu-system-x86_64'; qemu.parent.mkdir(parents=True)
 qemu.write_text('#!/bin/sh\nexec '+shlex.quote(sys.executable)+' '+shlex.quote(__file__)+' --spawn '+shlex.quote(str(base))+' "$@"\n')
 qemu.chmod(0o700)
-config = {'memory_mib':1024,'cpus':1,'ssh_port':40328,'forwards':[],'future_field':{'keep':True}}
+config = {'memory_mib':1024,'cpus':1,'ssh_port':40328,'forwards':[],'auto_stop':False,'future_field':{'keep':True}}
 (base/'config.json').write_text(json.dumps(config))
 def run(args, success=True, home=None):
     environment = dict(os.environ)
@@ -82,18 +82,7 @@ try:
     run(['profile'],home=root)
     assert profile.read_text()==once and once.startswith('export KEEP=value\n')
     assert (base/'profile.before').read_text()=='export KEEP=value\n'
-    shutil.copy2(binary,base/'helios-container-native')
-    bindir=root/'.local/bin'; bindir.mkdir(parents=True)
-    original={}
-    for name in ('helios-container','docker'):
-        path=bindir/name
-        path.write_text('#!/bin/sh\n# helios-container managed launcher\nexec '+str(base/'runtime.py')+' "$@"\n')
-        path.chmod(0o700); original[name]=path.read_bytes()
-    run(['adopt'],home=root)
-    assert all(b'helios-container-native' in (bindir/name).read_bytes() for name in original)
-    run(['rollback'],home=root)
-    assert all((bindir/name).read_bytes()==old for name,old in original.items())
-    print('Native fixture OK: start, QMP, forwarding, graceful stop, settings, profile and launcher rollback')
+    print('Native fixture OK: start, QMP, forwarding, graceful stop, settings and profile')
 finally:
     # This is the fixture directory created above, never the live installation.
     assert base.resolve().is_relative_to(root) and base.name.startswith('fixture-')

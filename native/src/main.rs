@@ -1,10 +1,18 @@
 //! Native runtime, using the existing VM and on-disk JSON contracts.
+mod agent;
+mod dashboard;
+mod idle;
+mod install;
+mod update;
 use serde_json::{json, Value};
 use std::{
     env, fs,
     io::{self, BufRead, BufReader, IsTerminal, Read, Write},
     net::TcpListener,
-    os::unix::{fs::OpenOptionsExt, net::UnixStream},
+    os::unix::{
+        fs::{OpenOptionsExt, PermissionsExt},
+        net::UnixStream,
+    },
     path::{Path, PathBuf},
     process::{Command, Stdio},
     thread,
@@ -37,19 +45,31 @@ fn output(cmd: &mut Command) -> Result<String> {
 }
 fn short_output(cmd: &mut Command, timeout: Duration) -> Result<String> {
     let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::null()).spawn()?;
+    let mut pipe = child.stdout.take().ok_or("Нет stdout")?;
+    let reader = thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let mut chunk = [0u8; 8192];
+        let mut exceeded = false;
+        loop {
+            let n = pipe.read(&mut chunk)?;
+            if n == 0 {
+                break;
+            }
+            if bytes.len() + n <= 262144 {
+                bytes.extend_from_slice(&chunk[..n]);
+            } else {
+                exceeded = true;
+            }
+        }
+        Ok::<_, io::Error>((bytes, exceeded))
+    });
     let until = Instant::now() + timeout;
     loop {
         if let Some(status) = child.try_wait()? {
-            if !status.success() {
-                return Err("Команда не выполнена".into());
+            let (bytes, exceeded) = reader.join().map_err(|_| "Ошибка чтения команды")??;
+            if !status.success() || exceeded {
+                return Err("Команда не выполнена или ответ слишком велик".into());
             }
-            let mut bytes = Vec::new();
-            child
-                .stdout
-                .take()
-                .ok_or("Нет stdout")?
-                .take(262144)
-                .read_to_end(&mut bytes)?;
             return Ok(String::from_utf8(bytes)?);
         }
         if Instant::now() >= until {
@@ -60,8 +80,14 @@ fn short_output(cmd: &mut Command, timeout: Duration) -> Result<String> {
         thread::sleep(Duration::from_millis(50));
     }
 }
+
+static TEMP_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 fn atomic(path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
-    let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
+    let tmp = path.with_extension(format!(
+        "tmp-{}-{}",
+        std::process::id(),
+        TEMP_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -69,6 +95,7 @@ fn atomic(path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
         .open(&tmp)?;
     if let Err(error) = (|| -> io::Result<()> {
         file.write_all(bytes)?;
+        file.set_permissions(fs::Permissions::from_mode(mode))?;
         file.sync_all()?;
         fs::rename(&tmp, path)?;
         Ok(())
@@ -260,6 +287,20 @@ impl Kit {
         Err("Нет ответа QMP".into())
     }
     fn start(&self, wait: bool) -> Result<()> {
+        let update_lock = FileLock::exclusive(&self.base.join(".update.lock"))?;
+        let lifecycle_lock = FileLock::exclusive(&self.base.join(".lifecycle.lock"))?;
+        let current = Self::load(self.base.clone())?;
+        if current.c != self.c {
+            return current.start_locked(wait, update_lock, lifecycle_lock);
+        }
+        self.start_locked(wait, update_lock, lifecycle_lock)
+    }
+    fn start_locked(
+        &self,
+        wait: bool,
+        update_lock: FileLock,
+        lifecycle_lock: FileLock,
+    ) -> Result<()> {
         if self.pid().is_none() {
             let vm = self.vm();
             let qemu = self.base.join("qemu/usr/local");
@@ -322,10 +363,12 @@ impl Kit {
                 self.c["cpus"], self.c["memory_mib"]
             );
         }
+        drop(lifecycle_lock);
+        drop(update_lock);
         if wait {
             self.ready()?;
         }
-        self.ensure_legacy_services()?;
+        self.ensure_services()?;
         Ok(())
     }
     fn ready(&self) -> Result<()> {
@@ -355,6 +398,7 @@ impl Kit {
         Err("Docker не готов за 10 минут".into())
     }
     fn stop(&self, force: bool) -> Result<()> {
+        let _lock = FileLock::exclusive(&self.base.join(".lifecycle.lock"))?;
         if self.pid().is_none() {
             println!("VM остановлена");
             return Ok(());
@@ -370,31 +414,75 @@ impl Kit {
         println!("VM остановлена");
         Ok(())
     }
-    fn ensure_legacy_services(&self) -> Result<()> {
-        // Migration boundary: preserve the current gateway and optional idle monitor.
-        if !self.base.join("web.json").exists() && !self.base.join("idle.py").exists() {
-            return Ok(());
+    fn ensure_services(&self) -> Result<()> {
+        idle::ensure(self)?;
+        if self.base.join("web.json").exists() {
+            agent::ensure(&self.base)?;
         }
-        let script="import sys; from pathlib import Path; b=Path(sys.argv[1]); sys.path.insert(0,str(b)); from runtime import Kit; k=Kit(b)\nif (b/'idle.py').exists():\n from idle import ensure_monitor\n ensure_monitor(k)\nif (b/'web.json').exists():\n from gateway import ensure_agent\n ensure_agent(b)";
-        checked(Command::new(python()).args(["-c", script]).arg(&self.base))
+        Ok(())
     }
-    fn legacy(&self, args: &[String]) -> Result<i32> {
-        Ok(Command::new(python())
-            .arg(self.base.join("runtime.py"))
-            .args(args)
-            .status()?
-            .code()
-            .unwrap_or(1))
+    fn forward(&mut self, guest: u16, preferred: u16) -> Result<u16> {
+        let _lease = Lease::acquire(&self.base)?;
+        self.start(true)?;
+        let _lock = FileLock::exclusive(&self.base.join(".lifecycle.lock"))?;
+        self.c = read_json(&self.base.join("config.json"))?;
+        if let Some(old) = self.c["forwards"]
+            .as_array()
+            .and_then(|m| m.iter().find(|m| m["guest"] == guest))
+        {
+            return Ok(old["host"].as_u64().ok_or("Некорректный порт")? as u16);
+        }
+        let listener = TcpListener::bind(("127.0.0.1", preferred))?;
+        let host = listener.local_addr()?.port();
+        drop(listener);
+        let reply = self.qmp(
+            "human-monitor-command",
+            json!({"command-line":format!("hostfwd_add net0 tcp:127.0.0.1:{host}-:{guest}")}),
+        )?;
+        if !reply.as_str().unwrap_or("error").trim().is_empty() {
+            return Err("QEMU не создал проброс порта".into());
+        }
+        if self.c.get("forwards").is_none() {
+            self.c["forwards"] = json!([]);
+        }
+        self.c["forwards"]
+            .as_array_mut()
+            .ok_or("Некорректные forwards")?
+            .push(json!({"host":host,"guest":guest}));
+        if let Err(error) = self.save() {
+            let _ = self.qmp(
+                "human-monitor-command",
+                json!({"command-line":format!("hostfwd_remove net0 tcp:127.0.0.1:{host}")}),
+            );
+            return Err(error);
+        }
+        Ok(host)
     }
 }
-fn python() -> String {
-    env::var("HC_PYTHON").unwrap_or_else(|_| {
-        if Path::new("/usr/local/bin/python3.11").exists() {
-            "/usr/local/bin/python3.11".into()
-        } else {
-            "python3".into()
+struct FileLock(fs::File);
+impl FileLock {
+    fn exclusive(path: &Path) -> Result<Self> {
+        use std::os::fd::AsRawFd;
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .mode(0o600)
+            .open(path)?;
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
+            return Err(io::Error::last_os_error().into());
         }
-    })
+        Ok(Self(file))
+    }
+}
+impl Drop for FileLock {
+    fn drop(&mut self) {
+        use std::os::fd::AsRawFd;
+        unsafe {
+            libc::flock(self.0.as_raw_fd(), libc::LOCK_UN);
+        }
+    }
 }
 fn port(value: &str, low: u16) -> Result<u16> {
     let n = value.parse::<u16>()?;
@@ -436,58 +524,48 @@ fn profile(base: &Path) -> Result<()> {
     println!("PATH настроен. Выполните: . ~/.profile");
     Ok(())
 }
-fn adopt(kit: &Kit, rollback: bool) -> Result<()> {
-    let home = PathBuf::from(env::var("HOME")?).canonicalize()?;
-    if !kit.base.starts_with(&home) || kit.base == home {
-        return Err("Установка должна находиться внутри HOME".into());
+fn uninstall(kit: &Kit, args: &[String]) -> Result<()> {
+    if args != ["--yes"] {
+        return Err("uninstall --yes удалит VM, контейнеры, volumes и настройки без возможности восстановления. Сначала выполните stop".into());
     }
-    let dir = home.join(".local/bin");
-    fs::create_dir_all(&dir)?;
-    let binary = kit.base.join("helios-container-native");
-    if !binary.is_file() {
-        return Err("Сначала установите проверенный бинарник рядом с runtime.py".into());
+    let base = install::safe_base(&kit.base)?;
+    let _update = FileLock::exclusive(&base.join(".update.lock"))?;
+    let _lifecycle = FileLock::exclusive(&base.join(".lifecycle.lock"))?;
+    if kit.pid().is_some() {
+        return Err("Сначала выполните helios-container stop".into());
     }
-    let mut changes = Vec::new();
-    for (name, extra) in [("helios-container", ""), ("docker", " docker")] {
-        let path = dir.join(name);
-        if fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) {
-            return Err("Launcher является ссылкой".into());
-        }
-        let old = fs::read_to_string(&path)?;
-        if !old.contains("# helios-container managed launcher")
-            || !old.contains(&kit.base.display().to_string())
-        {
-            return Err("Launcher не принадлежит этой установке".into());
-        }
-        let backup = kit.base.join(format!("{name}.before-rust"));
-        let text = if rollback {
-            fs::read_to_string(&backup)?
-        } else {
-            format!(
-                "#!/bin/sh\n# helios-container managed launcher\nexec {} --base {}{extra} \"$@\"\n",
-                quote(&binary.display().to_string()),
-                quote(&kit.base.display().to_string())
-            )
-        };
-        changes.push((path, backup, old, text));
+    idle::stop(&base)?;
+    if base.join("web.json").exists() {
+        agent::manage(kit, &["remove".into()])?;
     }
-    for (path, backup, old, text) in changes {
-        if !rollback && !backup.exists() {
-            atomic(&backup, old.as_bytes(), 0o600)?;
+    let home = PathBuf::from(env::var("HOME")?);
+    for name in ["helios-container", "docker"] {
+        let path = home.join(".local/bin").join(name);
+        install::no_links(&path)?;
+        if path.exists() {
+            let text = fs::read_to_string(&path)?;
+            if text.contains("# helios-container managed launcher")
+                && text.contains(&base.to_string_lossy().to_string())
+            {
+                fs::remove_file(path)?;
+            }
         }
-        atomic(&path, text.as_bytes(), 0o700)?;
     }
-    println!(
-        "{}",
-        if rollback {
-            "Команды возвращены на Python. VM и данные сохранены"
-        } else {
-            "Команды переключены на Rust. VM и данные сохранены"
+    let path = home.join(".profile");
+    install::no_links(&path)?;
+    if path.exists() {
+        let mut text = fs::read_to_string(&path)?;
+        if let (Some(a), Some(b)) = (text.find(BEGIN), text.find(END)) {
+            if b >= a {
+                text.replace_range(a..b + END.len(), "");
+                atomic(&path, text.as_bytes(), 0o600)?;
+            }
         }
-    );
+    }
+    fs::remove_dir_all(&base)?;
+    println!("Kit и данные VM удалены");
     Ok(())
 }
-
 fn main_inner() -> Result<i32> {
     let mut args: Vec<String> = env::args().skip(1).collect();
     let mut base = PathBuf::from(env::var("HOME")?).join(".local/helios-container");
@@ -499,7 +577,11 @@ fn main_inner() -> Result<i32> {
         args.remove(0);
     }
     if args.is_empty() || ["--help", "-h", "help"].contains(&args[0].as_str()) {
-        println!("helios-container (Rust)\nstart, stop [--force], status, docker …, ssh …, upload, download, forward, configure, logs, profile, version\nweb, update, check-update, uninstall: совместимый Python-модуль\nadopt, rollback: переключение существующей установки\n--base PATH: существующий каталог kit");
+        println!("helios-container (Rust)\nstart, stop [--force], status, docker …, ssh …, upload, download, forward, configure, logs, profile, version\ninstall, web, update, check-update, uninstall: нативные команды\n--base PATH: существующий каталог kit");
+        return Ok(0);
+    }
+    if args[0] == "--build-version" {
+        println!("{}", env!("CARGO_PKG_VERSION"));
         return Ok(0);
     }
     if args[0] == "version" {
@@ -511,11 +593,16 @@ fn main_inner() -> Result<i32> {
         );
         return Ok(0);
     }
+    if args[0] == "install" {
+        install::run(&args[1..])?;
+        return Ok(0);
+    }
     let base = base.canonicalize()?;
     let mut kit = Kit::load(base)?;
     match args[0].as_str() {
-        "adopt" => adopt(&kit, false)?,
-        "rollback" => adopt(&kit, true)?,
+        "_agent" => agent::serve(kit.base.clone())?,
+        "_idle" => idle::run(kit.base.clone())?,
+
         "start" => {
             let _lease = Lease::acquire(&kit.base)?;
             kit.start(true)?;
@@ -586,42 +673,12 @@ fn main_inner() -> Result<i32> {
             } else {
                 0
             };
-            if let Some(old) = kit.c["forwards"]
-                .as_array()
-                .and_then(|m| m.iter().find(|m| m["guest"] == guest))
-            {
-                println!("TCP 127.0.0.1:{} → VM:{}", old["host"], guest);
-                return Ok(0);
-            }
-            let _lease = Lease::acquire(&kit.base)?;
-            kit.start(true)?;
-            let listener = TcpListener::bind(("127.0.0.1", preferred))?;
-            let host = listener.local_addr()?.port();
-            drop(listener);
-            let reply = kit.qmp(
-                "human-monitor-command",
-                json!({"command-line":format!("hostfwd_add net0 tcp:127.0.0.1:{host}-:{guest}")}),
-            )?;
-            if !reply.as_str().unwrap_or("error").trim().is_empty() {
-                return Err("QEMU не создал проброс порта".into());
-            }
-            if kit.c.get("forwards").is_none() {
-                kit.c["forwards"] = json!([]);
-            }
-            kit.c["forwards"]
-                .as_array_mut()
-                .ok_or("Некорректные forwards")?
-                .push(json!({"host":host,"guest":guest}));
-            if let Err(error) = kit.save() {
-                let _ = kit.qmp(
-                    "human-monitor-command",
-                    json!({"command-line":format!("hostfwd_remove net0 tcp:127.0.0.1:{host}")}),
-                );
-                return Err(error);
-            }
+            let host = kit.forward(guest, preferred)?;
             println!("TCP 127.0.0.1:{host} → VM:{guest}");
         }
         "configure" => {
+            let _lock = FileLock::exclusive(&kit.base.join(".lifecycle.lock"))?;
+            kit.c = read_json(&kit.base.join("config.json"))?;
             if (args.len() - 1) % 2 != 0 {
                 return Err("configure требует пары --параметр значение".into());
             }
@@ -648,7 +705,7 @@ fn main_inner() -> Result<i32> {
             }
             kit.save()?;
             if kit.pid().is_some() {
-                kit.ensure_legacy_services()?;
+                kit.ensure_services()?;
             }
             println!("Настройки сохранены");
         }
@@ -688,7 +745,9 @@ fn main_inner() -> Result<i32> {
                 .code()
                 .unwrap_or(1));
         }
-        "web" | "update" | "check-update" | "uninstall" => return kit.legacy(&args),
+        "web" => agent::manage(&kit, &args[1..])?,
+        "update" | "check-update" => update::run(&kit, &args)?,
+        "uninstall" => uninstall(&kit, &args[1..])?,
         _ => return Err("Неизвестная команда. Выполните helios-container --help".into()),
     }
     Ok(0)
@@ -709,6 +768,15 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bounded_command_drains_more_than_pipe_capacity() {
+        let raw = short_output(
+            Command::new("sh").args(["-c", "head -c 200000 /dev/zero"]),
+            Duration::from_secs(3),
+        )
+        .unwrap();
+        assert_eq!(raw.len(), 200000);
+    }
     #[test]
     fn quoted_arguments_cannot_become_shell_code() {
         assert_eq!(

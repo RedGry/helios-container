@@ -30,8 +30,9 @@ if ($path === '' || $path === '/') {
 @media(max-width:760px){.table-wrap{min-width:980px}.summary{gap:18px;flex-wrap:wrap}.summary strong{font-size:14px}.view-head{padding:18px 16px 12px}.scroll-area{padding:0 16px 18px}}
 .actions button.danger-icon{border-left:1px solid var(--line);border-radius:0;margin-left:7px;padding-left:12px}
 .app{grid-template-rows:52px minmax(0,1fr) 38px}.footer{gap:16px;overflow-x:auto;white-space:nowrap}.engine-panel{display:flex;align-items:center;gap:12px}.engine-panel button{padding:3px 6px;font-size:11px}.engine-controls{display:flex;align-items:center;gap:5px}.engine-resources{font-size:10px;color:var(--muted)}.kit-version{margin-left:auto;color:var(--blue)}.footer #operation-status{max-width:300px;overflow:hidden;text-overflow:ellipsis}
+.topbar{gap:12px}.topbar .update-notice{background:#edf5ff;color:#075aab;border-color:#69b8ff;font-weight:600;white-space:nowrap}.update-notice:before{content:'↑';margin-right:8px}#release-dialog{width:min(700px,calc(100vw - 32px));max-height:85dvh}#release-notes{white-space:pre-wrap;overflow-wrap:anywhere;max-height:45dvh;overflow:auto;font:13px/1.7 inherit;padding:16px;background:var(--panel);border:1px solid var(--line);border-radius:8px}#release-version{color:var(--muted);font-size:13px}.release-command{font:12px/1.6 ui-monospace,monospace;overflow-wrap:anywhere}@media(max-width:760px){.topbar small{display:none}.topbar{padding:0 12px}.topbar .update-notice{font-size:11px;padding:7px}.brand{font-size:12px}}
 </style></head><body>
-<main class="app"><header class="topbar"><div class="brand"><span class="brand-icon">▦</span>Helios Container</div><small>Личный Docker · FreeBSD → Linux VM</small></header>
+<main class="app"><header class="topbar"><div class="brand"><span class="brand-icon">▦</span>Helios Container</div><button id="update-notice" class="update-notice" type="button" aria-haspopup="dialog" aria-controls="release-dialog" hidden></button><small>Личный Docker · FreeBSD → Linux VM</small></header>
 <div class="layout"><nav class="sidebar" role="tablist" aria-label="Личная панель" aria-orientation="vertical"><div class="nav-label">Навигация</div>
 <button id="containers-tab" role="tab" aria-selected="true" aria-controls="containers-view" title="Контейнеры"><span class="nav-icon">▦</span><span class="nav-text">Контейнеры</span></button>
 <button id="images-tab" role="tab" aria-selected="false" aria-controls="images-view" tabindex="-1" title="Образы"><span class="nav-icon">◈</span><span class="nav-text">Образы</span></button>
@@ -59,6 +60,31 @@ const stateNames = {running:'Запущен',exited:'Остановлен',creat
 function el(tag, text='') { const node = document.createElement(tag); node.textContent = text; return node; }
 function badge(state, text) { const node = el('span', text || stateNames[state] || state); node.className = 'badge ' + state; return node; }
 function empty(body, columns, text) { const row = el('tr'), cell = el('td', text); cell.colSpan = columns; cell.className = 'empty'; row.append(cell); body.append(row); }
+const releaseDialog=el('dialog'); releaseDialog.id='release-dialog'; releaseDialog.setAttribute('aria-labelledby','release-title');
+const releaseTitle=el('h2','Что нового'); releaseTitle.id='release-title';
+const releaseVersion=el('p'); releaseVersion.id='release-version';
+const releaseNotes=el('div'); releaseNotes.id='release-notes';
+const releaseHelp=el('p'); releaseHelp.className='release-command';
+const releaseButtons=el('div'); releaseButtons.className='dialog-actions';
+const releaseLink=el('a','Открыть полный changelog'); releaseLink.target='_blank'; releaseLink.rel='noopener noreferrer';
+const releaseClose=el('button','Закрыть'); releaseClose.type='button'; releaseClose.addEventListener('click',()=>releaseDialog.close());
+releaseButtons.append(releaseLink,releaseClose); releaseDialog.append(releaseTitle,releaseVersion,releaseNotes,releaseHelp,releaseButtons); document.body.append(releaseDialog);
+function renderRelease() {
+  const update=snapshot && snapshot.update, button=$('#update-notice');
+  const valid=update && update.available===true && /^\d+\.\d+\.\d+$/.test(update.latest_version || '');
+  button.hidden=!valid;
+  if(!valid) { if(releaseDialog.open) releaseDialog.close(); return; }
+  button.textContent='Доступна версия '+update.latest_version+' · Что нового';
+  button.title='Посмотреть изменения версии '+update.latest_version;
+  releaseVersion.textContent='Установлена '+update.current_version+' → доступна '+update.latest_version;
+  releaseNotes.textContent=update.notes || 'Описание изменений доступно на странице релиза.';
+  releaseHelp.textContent=update.compatible ? 'Для обновления на helios: helios-container stop, затем helios-container update. Данные сохранятся.' : 'Для этой версии пока нет совместимой Rust-сборки FreeBSD amd64. Можно ознакомиться с изменениями на GitHub.';
+  // Construct the URL ourselves; release text is always plain text, never HTML.
+  const expected='https://github.com/RedGry/helios-container/releases/tag/';
+  releaseLink.href=expected+'v'+update.latest_version;
+  if(typeof update.changelog_url==='string' && new RegExp('^'+expected+'v?'+update.latest_version.replaceAll('.','\\.')+'$').test(update.changelog_url)) releaseLink.href=update.changelog_url;
+}
+$('#update-notice').addEventListener('click',()=>{renderRelease(); if(!$('#update-notice').hidden && !releaseDialog.open) releaseDialog.showModal();});
 async function api(path, method='GET', body) {
   if (!key) throw new Error('Откройте приватную ссылку из helios-container web info.');
   const response = await fetch(new URL('index.php/' + path, location.href), {method,headers:{'X-HC-Admin':key,'Content-Type':'application/json'},body:body && JSON.stringify(body),cache:'no-store'});
@@ -162,6 +188,7 @@ function renderDetail() {
 }
 function renderEngine() {
   if(!snapshot) return;
+  renderRelease();
   const vm=snapshot.vm, busy=Boolean(pending || actionBusy), root=$('#engine-controls'); root.replaceChildren();
   for(const [kind,name,running] of [['vm','VM',vm.running],['engine','Docker',vm.docker_running]]) {
     const button=el('button',(running?'■ ':'▶ ')+name); button.title=(running?'Остановить ':'Запустить ')+name; button.setAttribute('aria-label',button.title); button.disabled=busy || (kind==='engine'&&!vm.running);
