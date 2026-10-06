@@ -79,6 +79,16 @@ helios-container configure --memory 4096 --cpus 2
 helios-container start
 ```
 
+Для тяжёлого параллельного запуска можно явно выбрать до **8 vCPU**:
+
+```sh
+helios-container stop
+helios-container configure --memory 4096 --cpus 8
+helios-container start
+```
+
+Это опциональный профиль: vCPU не резервируют ядра общего сервера и не отменяют квоты аккаунта. Если установленный kit отклоняет значение 8, обновите его до сборки с этой возможностью. [Замеры, ограничения и возврат к 4 vCPU →](docs/optimizations.md#профиль-8-vcpu)
+
 ## Что важно знать
 
 - CPU эмулируется через QEMU TCG: сборки и тяжёлые приложения работают медленнее.

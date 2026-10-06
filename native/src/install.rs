@@ -435,8 +435,8 @@ pub(super) fn run(args: &[String]) -> Result<()> {
     {
         return Err("Поддерживается FreeBSD 14.x amd64".into());
     }
-    if !(512..=16384).contains(&memory) || !(1..=4).contains(&cpus) || !(4..=64).contains(&disk) {
-        return Err("RAM 512–16384 МиБ, CPU 1–4, диск 4–64 ГиБ".into());
+    if !(512..=16384).contains(&memory) || !(1..=8).contains(&cpus) || !(4..=64).contains(&disk) {
+        return Err("RAM 512–16384 МиБ, CPU 1–8, диск 4–64 ГиБ".into());
     }
     let base = safe_base(&base)?;
     for tool in [

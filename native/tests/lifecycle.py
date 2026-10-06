@@ -63,19 +63,19 @@ def run(args, success=True, home=None):
     assert (result.returncode==0)==success, (args,result.returncode,result.stderr)
     return result
 try:
-    run(['configure','--cpus','2'])
+    run(['configure','--cpus','8'])
     assert json.loads((base/'config.json').read_text())['future_field']=={'keep':True}
     run(['start'])
     args = json.loads((vm/'qemu.argv').read_text())
-    assert args[args.index('-accel')+1]=='tcg' and args[args.index('-smp')+1]=='2'
+    assert args[args.index('-accel')+1]=='tcg' and args[args.index('-smp')+1]=='8'
     run(['configure','--memory','512'],success=False)
     run(['forward','18080'])
     command = (vm/'forward.command').read_text()
     assert command.startswith('hostfwd_add net0 tcp:127.0.0.1:') and command.endswith('-:18080')
     assert json.loads((base/'config.json').read_text())['future_field']=={'keep':True}
     run(['stop'])
-    run(['configure','--cpus','5'],success=False)
-    assert json.loads((base/'config.json').read_text())['cpus']==2
+    run(['configure','--cpus','9'],success=False)
+    assert json.loads((base/'config.json').read_text())['cpus']==8
     profile = root/'.profile'; profile.write_text('export KEEP=value\n')
     run(['profile'],home=root)
     once = profile.read_text()
