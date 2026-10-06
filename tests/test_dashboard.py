@@ -1,4 +1,5 @@
 import json
+from contextlib import nullcontext
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -60,6 +61,26 @@ class DashboardTests(unittest.TestCase):
             volume['containers'] = []
             self.panel.action({'action':'delete','kind':'volume','id':'demo-data','confirm':'demo-data'})
             self.assertEqual(worker.call_args.kwargs['args'][1:4], (['demo-data'], 'delete', 'volume'))
+
+    def test_container_delete_requires_stopped_state_and_name_confirmation(self):
+        ident = 'a' * 64
+        container = {'ID': ident, 'Names': 'demo-web', 'State': 'running'}
+        inventory = {'vm': {'running': True}, 'error': None, 'containers': [container]}
+        with patch.object(self.panel, 'snapshot', return_value=inventory), patch.object(dashboard.threading, 'Thread') as worker:
+            value = {'action': 'delete', 'kind': 'container', 'id': ident, 'confirm': 'demo-web'}
+            with self.assertRaises(ValueError): self.panel.action(value)
+            container['State'] = 'exited'
+            with self.assertRaises(ValueError): self.panel.action(dict(value, confirm='other'))
+            worker.assert_not_called()
+            self.panel.action(value)
+            self.assertEqual(worker.call_args.kwargs['args'][1:4], ([ident], 'delete', 'container'))
+
+    def test_container_delete_preserves_volumes_and_uses_no_force(self):
+        self.panel.jobs['test'] = {'status': 'running'}
+        with patch.dict(sys.modules, idle=SimpleNamespace(activity=lambda kit: nullcontext())), patch.object(dashboard, 'Kit', return_value=self.kit), patch.object(dashboard.subprocess, 'run') as run:
+            self.panel._perform('test', ['a' * 64], 'delete', 'container')
+            self.assertEqual(run.call_args.args[0][-1], 'docker container rm -- ' + 'a' * 64)
+            self.assertEqual(self.panel.jobs['test']['status'], 'done')
 
     def test_storage_reports_sizes_without_exposing_raw_docker_metadata(self):
         raw = (json.dumps({'Images':[{'ID':'image','SharedSize':'1MB','UniqueSize':'2MB'}], 'Volumes':[{'Name':'data','Size':'48.3MB','Labels':'secret'}]}) + '\nHC_VOLUME_META\n' + json.dumps({'Name':'data','CreatedAt':'2026-10-06T00:00:00Z'})).encode()

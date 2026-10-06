@@ -141,11 +141,17 @@ class Dashboard:
         if not snapshot['vm']['running'] or snapshot['error']:
             raise ValueError('Docker недоступен. Сначала запустите VM.')
         if kind in ('container', 'project'):
-            if payload['action'] == 'delete':
-                raise ValueError('Удаление контейнеров и проектов не поддерживается.')
+            if payload['action'] == 'delete' and kind == 'project':
+                raise ValueError('Удаляйте контейнеры проекта по отдельности.')
             ids = [c['ID'] for c in snapshot['containers'] if (c.get('project') == target if kind == 'project' else c['ID'] == target)]
             if not ids or any(not re.fullmatch(r'[0-9a-f]{64}', ident) for ident in ids):
                 raise ValueError('Контейнер или проект больше не существует. Обновите список.')
+            if payload['action'] == 'delete':
+                container = next(c for c in snapshot['containers'] if c['ID'] == target)
+                if container['State'] not in ('exited', 'created', 'dead'):
+                    raise ValueError('Сначала остановите контейнер.')
+                if payload.get('confirm') != container['Names']:
+                    raise ValueError('Подтвердите удаление выбранного контейнера.')
         else:
             if payload['action'] != 'delete':
                 raise ValueError('Для образов и volumes доступно только удаление.')
