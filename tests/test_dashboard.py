@@ -82,6 +82,53 @@ class DashboardTests(unittest.TestCase):
             self.assertEqual(run.call_args.args[0][-1], 'docker container rm -- ' + 'a' * 64)
             self.assertEqual(self.panel.jobs['test']['status'], 'done')
 
+    def test_project_delete_checks_confirmation_members_and_all_states(self):
+        ids = ['a' * 64, 'b' * 64]
+        containers = [{'ID': i, 'Names': 'web', 'State': 'exited', 'project': 'demo;echo bad'} for i in ids]
+        inventory = {'vm': {'running': True}, 'error': None, 'containers': containers}
+        value = {'action': 'delete', 'kind': 'project', 'id': 'demo;echo bad', 'confirm': 'demo;echo bad', 'container_ids': ids}
+        with patch.object(self.panel, 'snapshot', return_value=inventory), patch.object(dashboard.threading, 'Thread') as worker:
+            for invalid in (dict(value, confirm='other'), dict(value, container_ids=ids[:1])):
+                with self.assertRaises(ValueError): self.panel.action(invalid)
+            containers[1]['State'] = 'running'
+            with self.assertRaises(ValueError): self.panel.action(value)
+            worker.assert_not_called()
+            containers[1]['State'] = 'exited'
+            self.panel.action(value)
+            self.assertEqual(worker.call_args.kwargs['args'][1:4], (ids, 'delete', 'project'))
+        self.panel.jobs['test'] = {'status': 'running'}
+        with patch.dict(sys.modules, idle=SimpleNamespace(activity=lambda kit: nullcontext())), patch.object(dashboard, 'Kit', return_value=self.kit), patch.object(dashboard.subprocess, 'run') as run:
+            self.panel._perform('test', ids, 'delete', 'project')
+            self.assertEqual(run.call_args.args[0][-1], 'docker container rm -- ' + ' '.join(ids))
+
+    def test_vm_and_engine_actions_are_explicit_and_stops_confirmed(self):
+        with patch.object(dashboard, 'Kit', return_value=self.kit), patch.object(dashboard.threading, 'Thread') as worker:
+            for value in ({'kind':'vm','id':'vm','action':'stop'}, {'kind':'engine','id':'engine','action':'delete'}, {'kind':'vm','id':'other','action':'start'}):
+                with self.assertRaises(ValueError): self.panel.action(value)
+            worker.assert_not_called()
+            self.panel.action({'kind':'vm','id':'vm','action':'start'})
+            self.assertEqual(worker.call_args.kwargs['args'][1:4], ([], 'start', 'vm'))
+        self.panel.jobs['test']={'status':'running'}
+        with patch.object(dashboard, 'Kit', return_value=self.kit):
+            self.panel._perform('test', [], 'start', 'vm')
+            self.kit.start.assert_called_once_with(wait=False)
+            self.panel._perform('test', [], 'stop', 'vm')
+            self.kit.stop.assert_called_once_with()
+        with patch.object(dashboard, 'Kit', return_value=self.kit), patch.object(dashboard.subprocess, 'run') as run:
+            self.panel._perform('test', [], 'stop', 'engine')
+            self.assertEqual(run.call_args.args[0][-1], 'rc-service docker stop')
+
+    def test_vm_resources_remain_available_when_docker_is_stopped(self):
+        raw = b'HC_HEALTH\n4096000\n1024000\ncpu 100 0 20 300 0 0 0 0\n/dev/vda 10000000 2000000 8000000 20% /\n\nHC_INVENTORY\n'
+        with patch.object(dashboard, 'Kit', return_value=self.kit), patch.object(dashboard.subprocess, 'run', return_value=SimpleNamespace(stdout=raw)), patch.object(dashboard.threading, 'Thread'):
+            data = self.panel.snapshot()
+        self.assertTrue(data['vm']['running'])
+        self.assertFalse(data['vm']['docker_running'])
+        self.assertEqual(data['vm']['memory_used_bytes'], 3072000 * 1024)
+        self.assertEqual(data['vm']['disk_used_bytes'], 2000000 * 1024)
+        self.assertIsNone(data['vm']['cpu_percent'])
+        self.assertTrue(data['error'])
+
     def test_storage_reports_sizes_without_exposing_raw_docker_metadata(self):
         raw = (json.dumps({'Images':[{'ID':'image','SharedSize':'1MB','UniqueSize':'2MB'}], 'Volumes':[{'Name':'data','Size':'48.3MB','Labels':'secret'}]}) + '\nHC_VOLUME_META\n' + json.dumps({'Name':'data','CreatedAt':'2026-10-06T00:00:00Z'})).encode()
         with patch.object(dashboard, 'Kit', return_value=self.kit), patch.object(dashboard.subprocess, 'run', return_value=SimpleNamespace(stdout=raw)):

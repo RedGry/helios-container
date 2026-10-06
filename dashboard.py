@@ -39,6 +39,7 @@ class Dashboard:
         self.storage_data = {'volumes': {}, 'images': {}, 'updated_at': None, 'error': None}
         self.storage_due = 0
         self.storage_running = False
+        self.cpu_sample = None
 
     def snapshot(self):
         # Coalesce browser polling. Do not start a stopped VM to inspect it.
@@ -49,6 +50,9 @@ class Dashboard:
             data = {'vm': {'running': bool(kit.pid()), 'cpus': kit.config['cpus'],
                            'memory_mib': kit.config['memory_mib']}, 'containers': [], 'images': [], 'volumes': [],
                     'updated_at': int(time.time()), 'error': None}
+            marker = self.base / 'VERSION'
+            data['kit_version'] = marker.read_text().strip()[:40] if marker.is_file() else 'dev'
+            data['vm'].update(cpu_percent=None, memory_used_bytes=None, disk_used_bytes=None, disk_total_bytes=None, docker_version=None, docker_running=False)
             if data['vm']['running']:
                 command = shlex.join(['docker', 'container', 'ls', '-a', '--no-trunc', '--format', PS_FORMAT])
                 command += " && printf '\\nHC_IMAGES\\n' && " + shlex.join(['docker', 'image', 'ls', '--all', '--no-trunc', '--format', IMAGE_FORMAT])
@@ -56,13 +60,32 @@ class Dashboard:
                 command += " && printf '\\nHC_MOUNTS\\n' && docker container ls -aq | xargs -r " + shlex.join(['docker', 'inspect', '--format', MOUNT_FORMAT])
                 command += " && printf '\\nHC_STATS\\n' && docker stats --no-stream --format '{{json .}}'"
                 command += " && printf '\\nHC_MEMORY\\n' && awk '/MemTotal:/ {print $2}' /proc/meminfo"
+                command += " && printf '\\nHC_VERSION\\n' && docker info --format '{{.ServerVersion}}'"
+                command = "printf 'HC_HEALTH\\n'; awk '/MemTotal:/ {t=$2} /MemAvailable:/ {a=$2} END {print t; print a}' /proc/meminfo; head -n 1 /proc/stat; df -k /var/lib/docker | tail -n 1; printf '\\nHC_INVENTORY\\n'; " + command
                 try:
-                    result = subprocess.run(kit.ssh(command), capture_output=True, timeout=15, check=True)
-                    listing, rest = result.stdout.decode('utf-8', 'replace').split('\nHC_IMAGES\n', 1)
+                    result = subprocess.run(kit.ssh(command), capture_output=True, timeout=15, check=False)
+                    raw = result.stdout.decode('utf-8', 'replace')
+                    if raw.startswith('HC_HEALTH\n'):
+                        health, raw = raw.split('\nHC_INVENTORY\n', 1)
+                        lines = health.splitlines()[1:]
+                        data['vm']['memory_total_bytes'] = int(lines[0]) * 1024
+                        data['vm']['memory_used_bytes'] = max(0, (int(lines[0]) - int(lines[1])) * 1024)
+                        ticks = [int(v) for v in lines[2].split()[1:9]]
+                        sample = (sum(ticks), ticks[3] + ticks[4])
+                        if self.cpu_sample and sample[0] > self.cpu_sample[0]:
+                            data['vm']['cpu_percent'] = round(100 * (1 - (sample[1] - self.cpu_sample[1]) / (sample[0] - self.cpu_sample[0])), 2)
+                        self.cpu_sample = sample
+                        disk = lines[3].split()
+                        data['vm'].update(disk_total_bytes=int(disk[1])*1024, disk_used_bytes=int(disk[2])*1024)
+                    listing, rest = raw.split('\nHC_IMAGES\n', 1)
                     images, rest = rest.split('\nHC_VOLUMES\n', 1)
                     volumes, rest = rest.split('\nHC_MOUNTS\n', 1)
                     mounts, stats = rest.split('\nHC_STATS\n', 1)
                     stats, memory = stats.split('\nHC_MEMORY\n', 1)
+                    if '\nHC_VERSION\n' in memory:
+                        memory, version = memory.split('\nHC_VERSION\n', 1)
+                        data['vm']['docker_version'] = version.strip()[:40]
+                    data['vm']['docker_running'] = True
                     data['vm']['memory_total_bytes'] = int(memory.strip()) * 1024
                     details = {row['ID']: row for row in map(json.loads, mounts.splitlines()) if row}
                     usage = {row['ID']: row for row in map(json.loads, stats.splitlines()) if row}
@@ -83,7 +106,7 @@ class Dashboard:
                         image['containers'] = [c['Names'] for c in data['containers'] if c['image_id'] == image['ID']]
                     for volume in data['volumes']:
                         volume['containers'] = [c['Names'] for c in data['containers'] if any(m['Type'] == 'volume' and m['Name'] == volume['Name'] for m in c['mounts'])]
-                except (subprocess.SubprocessError, OSError, ValueError, KeyError):
+                except (subprocess.SubprocessError, OSError, ValueError, KeyError, IndexError):
                     data['error'] = 'Docker пока не отвечает. VM может загружаться.'
             self.cached, self.expires = data, time.monotonic() + 5
             return self._with_storage(data)
@@ -133,6 +156,14 @@ class Dashboard:
         if not isinstance(payload, dict) or payload.get('action') not in ('start', 'stop', 'restart', 'delete'):
             raise ValueError('Недопустимая операция.')
         kind, target = payload.get('kind', 'container'), payload.get('id', '')
+        if kind in ('vm', 'engine'):
+            if target != kind or payload['action'] not in ('start', 'stop'):
+                raise ValueError('Недопустимая операция VM или Docker.')
+            if payload['action'] == 'stop' and payload.get('confirm') != kind:
+                raise ValueError('Подтвердите остановку приложений.')
+            if kind == 'engine' and not Kit(self.base).pid():
+                raise ValueError('Сначала запустите VM.')
+            return self._queue([], payload['action'], kind)
         if kind not in ('container', 'project', 'image', 'volume') or not isinstance(target, str) or not target or len(target) > 200:
             raise ValueError('Некорректный контейнер или проект.')
         if kind == 'container' and not re.fullmatch(r'[0-9a-f]{12,64}', target):
@@ -141,17 +172,18 @@ class Dashboard:
         if not snapshot['vm']['running'] or snapshot['error']:
             raise ValueError('Docker недоступен. Сначала запустите VM.')
         if kind in ('container', 'project'):
-            if payload['action'] == 'delete' and kind == 'project':
-                raise ValueError('Удаляйте контейнеры проекта по отдельности.')
             ids = [c['ID'] for c in snapshot['containers'] if (c.get('project') == target if kind == 'project' else c['ID'] == target)]
             if not ids or any(not re.fullmatch(r'[0-9a-f]{64}', ident) for ident in ids):
                 raise ValueError('Контейнер или проект больше не существует. Обновите список.')
             if payload['action'] == 'delete':
-                container = next(c for c in snapshot['containers'] if c['ID'] == target)
-                if container['State'] not in ('exited', 'created', 'dead'):
-                    raise ValueError('Сначала остановите контейнер.')
-                if payload.get('confirm') != container['Names']:
-                    raise ValueError('Подтвердите удаление выбранного контейнера.')
+                containers = [c for c in snapshot['containers'] if c['ID'] in ids]
+                if any(c['State'] not in ('exited', 'created', 'dead') for c in containers):
+                    raise ValueError('Сначала остановите все выбранные контейнеры.')
+                confirmation = target if kind == 'project' else containers[0]['Names']
+                if payload.get('confirm') != confirmation:
+                    raise ValueError('Подтвердите удаление выбранного объекта.')
+                if kind == 'project' and payload.get('container_ids') != sorted(ids):
+                    raise ValueError('Состав проекта изменился. Обновите список и подтвердите удаление снова.')
         else:
             if payload['action'] != 'delete':
                 raise ValueError('Для образов и volumes доступно только удаление.')
@@ -176,14 +208,17 @@ class Dashboard:
             if payload.get('confirm') != confirmation:
                 raise ValueError('Подтвердите удаление выбранного объекта.')
             ids = [confirmation]
+        return self._queue(ids, payload['action'], kind, target if kind == 'image' else None)
+
+    def _queue(self, ids, action, kind, expected_image=None):
         with self.action_lock:
             if any(job['status'] == 'running' for job in self.jobs.values()):
                 raise ValueError('Дождитесь завершения текущей операции.')
             self.jobs = dict(list(self.jobs.items())[-15:])
             token = secrets.token_hex(16)
-            job = {'id': token, 'action': payload['action'], 'status': 'running', 'error': None}
+            job = {'id': token, 'action': action, 'status': 'running', 'error': None}
             self.jobs[token] = job
-            threading.Thread(target=self._perform, args=(token, ids, payload['action'], kind, target if kind == 'image' else None), daemon=True).start()
+            threading.Thread(target=self._perform, args=(token, ids, action, kind, expected_image), daemon=True).start()
             return dict(job)
 
     @staticmethod
@@ -194,9 +229,30 @@ class Dashboard:
         error = None
         try:
             kit = Kit(self.base)
+            if kind == 'vm':
+                if action == 'start':
+                    kit.start(wait=False)
+                else:
+                    kit.stop()
+            elif kind == 'engine':
+                if not kit.pid():
+                    raise RuntimeError('VM stopped')
+                subprocess.run(kit.ssh('rc-service docker ' + action), capture_output=True, timeout=120, check=True)
+            else:
+                self._container_operation(kit, ids, action, kind, expected_image)
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            error = 'Операция не завершилась. Обновите состояние VM и Docker.'
+        with self.action_lock:
+            self.jobs[token].update(status='error' if error else 'done', error=error)
+        with self.lock:
+            self.expires = 0
+        with self.storage_lock:
+            self.storage_due = 0
+
+    def _container_operation(self, kit, ids, action, kind, expected_image):
             if not kit.pid():
                 raise RuntimeError('VM stopped')
-            arguments = (['docker', kind, 'rm', '--'] + ids if action == 'delete' else
+            arguments = (['docker', 'container' if kind == 'project' else kind, 'rm', '--'] + ids if action == 'delete' else
                          ['docker', action] + (['--time', '5'] if action in ('stop', 'restart') else []) + ids)
             # Runtime activity lease also protects an action from optional idle shutdown.
             try:
@@ -210,14 +266,6 @@ class Dashboard:
                     if current.stdout.decode().strip() != expected_image:
                         raise RuntimeError('Image reference changed')
                 subprocess.run(kit.ssh(shlex.join(arguments)), capture_output=True, timeout=90, check=True)
-        except (OSError, RuntimeError, subprocess.SubprocessError):
-            error = 'Docker не завершил операцию. Обновите состояние контейнеров.'
-        with self.action_lock:
-            self.jobs[token].update(status='error' if error else 'done', error=error)
-        with self.lock:
-            self.expires = 0
-        with self.storage_lock:
-            self.storage_due = 0
 
     def job(self, token):
         if not isinstance(token, str) or not re.fullmatch(r'[0-9a-f]{32}', token):
