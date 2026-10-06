@@ -1,0 +1,9 @@
+parameters:
+    level: 8
+    paths:
+        - gateway.php
+    bootstrapFiles:
+        - tools/phpstan-bootstrap.php
+    phpVersion: 80200
+    tmpDir: .cache/phpstan
+    treatPhpDocTypesAsCertain: false

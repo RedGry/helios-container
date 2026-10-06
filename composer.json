@@ -1,0 +1,27 @@
+{
+    "name": "helios/container-dev",
+    "description": "Development checks for the Helios PHP gateway",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": "^8.2"
+    },
+    "require-dev": {
+        "friendsofphp/php-cs-fixer": "^3.0",
+        "phpstan/phpstan": "^2.1"
+    },
+    "scripts": {
+        "lint": "php -l gateway.php",
+        "format:check": "php-cs-fixer fix --dry-run --diff --using-cache=no",
+        "format": "php-cs-fixer fix --using-cache=no",
+        "analyse": "phpstan analyse --no-progress",
+        "check": ["@lint", "@format:check", "@analyse"]
+    },
+    "config": {
+        "sort-packages": true,
+        "platform": {
+            "php": "8.2.0"
+        },
+        "allow-plugins": false
+    }
+}

@@ -9,3 +9,7 @@ __pycache__/
 /.ssh/
 .env
 *.before-rust
+/vendor/
+/.cache/
+/.php-cs-fixer.cache
+/native/target/

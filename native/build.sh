@@ -7,6 +7,7 @@ fi
 cd "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 cargo test --locked
 cargo fmt --check
+cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo build --release --locked
 [ "$(./target/release/helios-container-native --build-version)" = "$(cat ../VERSION)" ]
 cp ../VERSION target/release/VERSION

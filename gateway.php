@@ -7,17 +7,20 @@ header('X-Content-Type-Options: nosniff');
 $path = $_SERVER['PATH_INFO'] ?? '';
 $script = $_SERVER['SCRIPT_NAME'];
 $rawPath = explode('?', $_SERVER['REQUEST_URI'] ?? '', 2)[0];
-if (str_starts_with($rawPath, $script . '/')) $path = substr($rawPath, strlen($script));
+if (str_starts_with($rawPath, $script . '/')) {
+    $path = substr($rawPath, strlen($script));
+}
 if ($path === '' || $path === '/') {
     if ($_SERVER['REQUEST_METHOD'] !== 'GET' && $_SERVER['REQUEST_METHOD'] !== 'HEAD') {
-        http_response_code(405); exit;
+        http_response_code(405);
+        exit;
     }
     $nonce = bin2hex(random_bytes(16));
     header('Content-Type: text/html; charset=utf-8');
     header('Cache-Control: no-store');
     header('Referrer-Policy: no-referrer');
     header("Content-Security-Policy: default-src 'none'; script-src 'nonce-$nonce'; style-src 'nonce-$nonce'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
-?>
+    ?>
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Helios · Личная панель</title>
 <script nonce="<?= $nonce ?>">
@@ -249,28 +252,39 @@ refresh(); setInterval(() => { if (!document.hidden) { if (pending) pollAction()
 </script></body></html>
 
 <?php
-    exit;
+        exit;
 }
 if (!ini_get('allow_url_fopen')) {
-    http_response_code(503); header('Content-Type: application/json'); echo '{"error":"PHP allow_url_fopen отключён."}'; exit;
+    http_response_code(503);
+    header('Content-Type: application/json');
+    echo '{"error":"PHP allow_url_fopen отключён."}';
+    exit;
 }
 if (!preg_match('~^/(?:_config|_dashboard|_logs|_action|(?:vm|host)/[0-9]{1,5}(?:/.*)?)$~D', $path)) {
-    http_response_code(404); exit;
+    http_response_code(404);
+    exit;
 }
 if (str_starts_with(strtolower($_SERVER['CONTENT_TYPE'] ?? ''), 'multipart/form-data')) {
-    http_response_code(415); header('Content-Type: application/json; charset=utf-8');
-    echo '{"error":"Multipart-загрузка через PHP-шлюз не поддерживается. Используйте JSON или application/octet-stream."}'; exit;
+    http_response_code(415);
+    header('Content-Type: application/json; charset=utf-8');
+    echo '{"error":"Multipart-загрузка через PHP-шлюз не поддерживается. Используйте JSON или application/octet-stream."}';
+    exit;
 }
 $body = file_get_contents('php://input', false, null, 0, 8 * 1024 * 1024 + 1);
 if ($body === false || strlen($body) > 8 * 1024 * 1024) {
-    http_response_code(413); exit;
+    http_response_code(413);
+    exit;
 }
 $hop = ['host', 'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade', 'content-length', 'expect'];
-foreach (explode(',', $_SERVER['HTTP_CONNECTION'] ?? '') as $name) $hop[] = strtolower(trim($name));
+foreach (explode(',', $_SERVER['HTTP_CONNECTION'] ?? '') as $name) {
+    $hop[] = strtolower(trim($name));
+}
 $headers = [];
 foreach (getallheaders() as $name => $value) {
     $lower = strtolower($name);
-    if (in_array($lower, $hop, true) || str_starts_with($lower, 'x-forwarded-') || str_starts_with($lower, 'x-hc-') && $lower !== 'x-hc-admin') continue;
+    if (in_array($lower, $hop, true) || str_starts_with($lower, 'x-forwarded-') || str_starts_with($lower, 'x-hc-') && $lower !== 'x-hc-admin') {
+        continue;
+    }
     $headers[] = $name . ': ' . $value;
 }
 $headers[] = 'X-HC-Bridge: ' . HC_BRIDGE;
@@ -283,21 +297,38 @@ $context = stream_context_create(['http' => ['method' => $_SERVER['REQUEST_METHO
     'content' => $body, 'ignore_errors' => true, 'follow_location' => 0, 'timeout' => 20, 'protocol_version' => 1.1]]);
 $stream = @fopen($url, 'rb', false, $context);
 if ($stream === false) {
-    http_response_code(502); header('Content-Type: application/json; charset=utf-8');
-    echo '{"error":"Шлюз недоступен. Выполните helios-container web start."}'; exit;
+    http_response_code(502);
+    header('Content-Type: application/json; charset=utf-8');
+    echo '{"error":"Шлюз недоступен. Выполните helios-container web start."}';
+    exit;
 }
 $meta = stream_get_meta_data($stream);
 $data = stream_get_contents($stream, 16 * 1024 * 1024 + 1);
 fclose($stream);
-if ($data === false || strlen($data) > 16 * 1024 * 1024) { http_response_code(502); exit; }
+if ($data === false || strlen($data) > 16 * 1024 * 1024) {
+    http_response_code(502);
+    exit;
+}
 http_response_code(502);
 foreach ($meta['wrapper_data'] ?? [] as $line) {
-    if (preg_match('~^HTTP/\S+ ([0-9]{3})~', $line, $match)) { http_response_code((int)$match[1]); continue; }
+    if (preg_match('~^HTTP/\S+ ([0-9]{3})~', $line, $match)) {
+        http_response_code((int)$match[1]);
+        continue;
+    }
     $colon = strpos($line, ':');
-    if ($colon === false) continue;
+    if ($colon === false) {
+        continue;
+    }
     $name = strtolower(substr($line, 0, $colon));
-    if (in_array($name, $hop, true) && !($name === 'content-length' && $_SERVER['REQUEST_METHOD'] === 'HEAD')) continue;
+    if (in_array($name, $hop, true) && !($name === 'content-length' && $_SERVER['REQUEST_METHOD'] === 'HEAD')) {
+        continue;
+    }
     header($line, $name !== 'set-cookie');
 }
-if (in_array($path, ['/_config', '/_dashboard', '/_logs', '/_action'], true)) { header('Cache-Control: no-store'); header('Referrer-Policy: no-referrer'); }
-if ($_SERVER['REQUEST_METHOD'] !== 'HEAD') echo $data;
+if (in_array($path, ['/_config', '/_dashboard', '/_logs', '/_action'], true)) {
+    header('Cache-Control: no-store');
+    header('Referrer-Policy: no-referrer');
+}
+if ($_SERVER['REQUEST_METHOD'] !== 'HEAD') {
+    echo $data;
+}

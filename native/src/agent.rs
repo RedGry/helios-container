@@ -587,7 +587,8 @@ fn handle(mut req: Request, state: &State) {
     if req.body_length().is_some_and(|n| n > MAX_BODY) {
         return json_reply(req, 413, json!({"error":"Запрос больше 8 МиБ"}));
     }
-    let result = (|| -> Result<(u16, Vec<u8>, Vec<(String, String)>, Option<usize>)> {
+    type GatewayResponse = (u16, Vec<u8>, Vec<(String, String)>, Option<usize>);
+    let result = (|| -> Result<GatewayResponse> {
         let body = body(&mut req, MAX_BODY)?;
         let suffix = format!(
             "/{}{}",
