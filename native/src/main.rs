@@ -111,12 +111,12 @@ fn read_json(path: &Path) -> Result<Value> {
 fn validate(c: &Value) -> Result<()> {
     for (key, low, high) in [
         ("memory_mib", 512, 16384),
-        ("cpus", 1, 4),
+        ("cpus", 1, 8),
         ("ssh_port", 1024, 65535),
     ] {
         let n = c[key].as_u64().ok_or("Некорректные настройки VM")?;
         if !(low..=high).contains(&n) {
-            return Err("RAM 512–16384 МиБ, CPU 1–4, SSH-порт 1024–65535".into());
+            return Err("RAM 512–16384 МиБ, CPU 1–8, SSH-порт 1024–65535".into());
         }
     }
     if c.get("auto_stop").is_some_and(|v| !v.is_boolean()) {
@@ -788,7 +788,11 @@ mod tests {
     fn validate_limits_and_unknown_values() {
         let mut c = json!({"memory_mib":4096,"cpus":4,"ssh_port":40328,"forwards":[],"future":{"keep":true}});
         assert!(validate(&c).is_ok());
-        c["cpus"] = json!(5);
+        c["cpus"] = json!(8);
+        assert!(validate(&c).is_ok());
+        c["cpus"] = json!(9);
+        assert!(validate(&c).is_err());
+        c["cpus"] = json!(0);
         assert!(validate(&c).is_err());
         c["cpus"] = json!(true);
         assert!(validate(&c).is_err());
