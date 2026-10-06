@@ -244,9 +244,21 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == '/_health' and self.command == 'GET':
             self.reply(200, b'helios-container gateway'); return
         parsed = urllib.parse.urlsplit(self.path)
-        if parsed.path in ('/_dashboard', '/_logs'):
+        if parsed.path in ('/_dashboard', '/_logs', '/_action'):
             if not hmac.compare_digest(self.headers.get('X-HC-Admin', ''), state['admin_key']):
                 self.json_reply(401, {'error': 'Откройте приватную ссылку из helios-container web info.'}); return
+            if parsed.path == '/_action':
+                if self.command == 'POST':
+                    length = int(self.headers.get('Content-Length', '0'))
+                    if not 0 < length <= 4096:
+                        self.json_reply(413, {'error': 'Слишком большой запрос.'}); return
+                    self.json_reply(202, self.server.dashboard.action(json.loads(self.rfile.read(length))))
+                elif self.command == 'GET':
+                    query = urllib.parse.parse_qs(parsed.query)
+                    self.json_reply(200, self.server.dashboard.job(query.get('id', [''])[0]))
+                else:
+                    self.json_reply(405, {'error': 'Используйте GET или POST.'})
+                return
             if self.command != 'GET':
                 self.json_reply(405, {'error': 'Панель доступна только для чтения.'}); return
             if parsed.path == '/_logs':

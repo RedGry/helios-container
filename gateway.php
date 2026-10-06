@@ -21,154 +21,173 @@ if ($path === '' || $path === '/') {
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Helios · Личная панель</title>
 <style nonce="<?= $nonce ?>">
-:root{font-family:system-ui,-apple-system,sans-serif;color:#1d2229;background:#f6f7f9;color-scheme:light dark}
-*{box-sizing:border-box}body{margin:0;min-height:100svh;display:grid;place-items:center;padding:24px}
-main{width:min(100%,940px)}section{padding:32px;border:1px solid #dfe3e8;border-radius:20px;background:#fff;box-shadow:0 12px 48px #202a3910}#ports-panel{max-width:480px;margin:auto} [hidden]{display:none!important}
-.brand{font-size:12px;font-weight:650;letter-spacing:.14em;text-transform:uppercase;color:#75808e;margin:0 0 24px}
-h1{font-size:26px;letter-spacing:-.04em;margin:0 0 12px}p{line-height:1.55;font-size:14px;color:#66717f;margin:0 0 24px}
-label{display:block;font-size:13px;font-weight:600;margin-bottom:8px}input{width:100%;padding:14px;border:1px solid #d0d6de;border-radius:10px;font:inherit;outline:none;background:transparent;color:inherit}
-input:focus{border-color:#4667e9;box-shadow:0 0 0 3px #4667e918}button{width:100%;margin-top:12px;border:0;border-radius:10px;padding:14px;background:#263b72;color:#fff;font:inherit;font-weight:600;cursor:pointer}button:disabled{opacity:.6;cursor:wait}
-small{display:block;margin-top:10px;line-height:1.5;color:#75808e}output{display:block;font-size:13px;overflow-wrap:anywhere;line-height:1.6;margin-top:20px}output a{display:block;color:#4667e9;margin-top:10px}output:empty{display:none}
-@media(prefers-color-scheme:dark){:root{color:#e4e8ee;background:#11151c}form{background:#1a202a;border-color:#303947}input{border-color:#414d60}p,small{color:#9ba7b8}button{background:#526edf}}
-nav{display:flex;gap:8px;margin:0 auto 20px;max-width:480px}nav button{margin:0;background:transparent;color:inherit;border:1px solid #dfe3e8;font-size:14px}nav button[aria-selected=true]{background:#263b72;color:white;border-color:#263b72}
-.toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.toolbar button{width:auto;margin:0;padding:10px 14px}.toolbar label{display:flex;gap:8px;align-items:center;margin:0;font-weight:400}.toolbar input{width:auto}select{font:inherit;padding:10px;border:1px solid #d0d6de;border-radius:8px;background:transparent;color:inherit}a{color:#4667e9}.table-wrap{overflow-x:auto;margin:20px 0}table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:12px 8px;border-bottom:1px solid #dfe3e8;vertical-align:top}th{color:#75808e;font-weight:500}td small{margin:4px 0 0}td button{width:auto;padding:7px 10px;margin:0;font-size:12px}.summary{line-height:1.7;margin:16px 0}.notice{font-size:13px;color:#75808e;line-height:1.6;margin-top:12px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#11151c;color:#dae3ed;padding:20px;border-radius:12px;max-height:480px;overflow:auto;font:12px/1.6 ui-monospace,monospace}.error{color:#bc3845}
-@media(prefers-color-scheme:dark){section{background:#1a202a;border-color:#303947}nav button,th,td{border-color:#303947}.notice,th{color:#9ba7b8}select{border-color:#414d60}}
-@media(max-width:600px){body{padding:12px}section{padding:22px}h1{font-size:23px}}
-#dashboard-panel{padding:0;overflow:hidden}.desktop-head{padding:28px 28px 20px;border-bottom:1px solid #dfe3e8}.desktop-head .brand{margin-bottom:12px}.desktop-head h1{margin-bottom:6px}.desktop-head p{margin-bottom:16px}.desktop-content{padding:20px 28px}.resource-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:18px}.resource-card{border:1px solid #dfe3e8;border-radius:10px;padding:14px 16px}.resource-card strong{display:block;font-size:23px;font-weight:600;letter-spacing:-.03em}.resource-card span{font-size:12px;color:#75808e}.desktop-head button,td button{background:#087be8}.toolbar .search{width:min(100%,300px);padding:10px 12px;font-size:13px}.badge{display:inline-flex;align-items:center;gap:6px;border-radius:6px;padding:4px 8px;background:#edf0f4;font-size:12px}.badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#8794a3}.badge.running{background:#e9f7ef;color:#197047}.badge.running::before{background:#27a36a}.badge.exited,.badge.dead{background:#f7eded;color:#9c4545}h2{font-size:16px;letter-spacing:-.02em;margin:26px 0 12px}#containers td:first-child{font-weight:600}#containers td small{font-weight:400}#log-panel{border-top:1px solid #dfe3e8;margin-top:24px}#dashboard-status{font-size:12px;color:#75808e;margin:12px 0 0}.desktop-content .table-wrap{margin-top:16px}#routes>div{font-size:13px;line-height:2}.desktop-content input:focus{border-color:#087be8}
-@media(prefers-color-scheme:dark){.desktop-head,.resource-card,#log-panel{border-color:#303947}.badge{background:#2b3441;color:#c6d0de}.badge.running{background:#193a2e;color:#87d9b0}.badge.exited,.badge.dead{background:#40282d;color:#edaaaa}.resource-card span,#dashboard-status{color:#9ba7b8}}
-@media(max-width:600px){.desktop-head,.desktop-content{padding:20px}.resource-card{padding:12px 10px}.resource-card strong{font-size:19px}}
+:root{font-family:Inter,system-ui,-apple-system,sans-serif;color:#182536;background:#f5f7fa;color-scheme:light dark;--panel:#fff;--line:#e1e6ed;--muted:#68778a;--blue:#087be8;--soft:#edf5ff;--sidebar:#f6f8fb}
+*{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden}body{height:100dvh}button,input,select{font:inherit}button{cursor:pointer;border:1px solid var(--line);background:var(--panel);color:inherit;border-radius:6px;padding:8px 12px;font-size:13px}button:hover{background:var(--soft)}button:disabled{opacity:.45;cursor:default}button.primary{background:var(--blue);border-color:var(--blue);color:#fff}a{color:var(--blue)}[hidden]{display:none!important}input,select{padding:9px 11px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:inherit;font-size:13px}input:focus,button:focus-visible,select:focus{outline:2px solid #087be860;outline-offset:2px}input[type=checkbox]{accent-color:var(--blue)}h1{font-size:25px;letter-spacing:-.035em;margin:0}h2{font-size:16px;margin:0 0 12px}p{color:var(--muted);line-height:1.6;font-size:13px}small{display:block;color:var(--muted);font-size:11px;margin-top:4px;font-weight:400;overflow-wrap:anywhere}
+.app{height:100%;display:grid;grid-template-rows:52px minmax(0,1fr) 28px}.topbar{display:flex;align-items:center;justify-content:space-between;padding:0 20px;background:#102d4d;color:#fff}.brand{font-size:14px;font-weight:650;letter-spacing:.02em}.brand-icon{color:#69b8ff;margin-right:10px}.topbar small{color:#a4bdd6;margin:0}.layout{display:grid;grid-template-columns:208px minmax(0,1fr);min-height:0}.sidebar{background:var(--sidebar);border-right:1px solid var(--line);padding:24px 12px;display:flex;flex-direction:column;gap:5px;min-height:0;overflow:auto}.nav-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.12em;padding:0 12px;margin:0 0 12px}.sidebar button{text-align:left;border:0;background:transparent;padding:12px;display:flex;gap:12px;align-items:center;font-size:14px}.sidebar button[aria-selected=true]{background:#e1efff;color:#086cc5;font-weight:600}.nav-icon{width:19px;font-size:17px;text-align:center}.sidebar .spacer{flex:1}.sidebar-note{padding:12px;font-size:11px;color:var(--muted);line-height:1.6}.workspace{min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--panel)}.view{flex:1;min-height:0;display:flex;flex-direction:column}.view-head{padding:26px 28px 18px;flex-shrink:0}.view-head p{margin:8px 0 16px}.headline{display:flex;align-items:center;justify-content:space-between;gap:16px}.toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.toolbar label{font-size:12px;display:flex;align-items:center;gap:7px;color:var(--muted)}.search{width:min(320px,100%)}.summary{display:flex;gap:36px;padding:14px 0 0;margin-top:16px;border-top:1px solid var(--line)}.summary strong{font-size:19px;font-weight:600}.summary span{display:block;color:var(--muted);font-size:11px;margin-top:3px}.scroll-area{flex:1;min-height:0;overflow:auto;padding:0 28px 24px;overscroll-behavior:contain}.table-wrap{border:1px solid var(--line);border-radius:8px;overflow:visible}table{width:100%;border-collapse:collapse;font-size:13px}td{overflow-wrap:anywhere}#containers-view th:first-child{width:25%}#containers-view th:last-child{width:95px}th{text-align:left;font-size:11px;letter-spacing:.02em;font-weight:500;color:var(--muted);background:var(--sidebar);position:sticky;top:0;z-index:1}th,td{padding:14px 16px;border-bottom:1px solid var(--line);vertical-align:middle}tbody tr:last-child td{border-bottom:0}tbody tr:hover{background:#087be804}.name-button{border:0;padding:0;background:transparent;text-align:left;font-weight:600;color:var(--blue);overflow-wrap:anywhere}.name-button:hover{background:transparent;text-decoration:underline}.actions{display:flex;gap:6px;justify-content:flex-end;white-space:nowrap}.actions button{font-size:16px;padding:4px 9px;min-width:34px}.badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);white-space:nowrap}.badge:before{content:'';width:7px;height:7px;border-radius:50%;background:#9ca9b7}.badge.running{color:#248452}.badge.running:before{background:#29a668}.badge.exited:before,.badge.dead:before{background:#da6470}.project{background:var(--sidebar);font-weight:600}.project button.disclosure{border:0;background:transparent;text-align:left;padding:0;font-weight:600}.child td:first-child{padding-left:40px}.notice{font-size:12px;color:var(--muted);line-height:1.6;margin:14px 0}.error{color:#c84553}.empty{padding:40px;text-align:center;color:var(--muted)}.footer{background:var(--sidebar);border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:10px;color:var(--muted)}.footer span:first-child:before{content:'●';color:#29a668;margin-right:8px}.message{font-size:12px;line-height:1.5;margin-top:12px;min-height:18px}.detail-head{padding:20px 28px 0;flex-shrink:0}.back{border:0;padding-left:0;color:var(--blue);margin-bottom:14px}.detail-meta{color:var(--muted);font-size:12px;margin:10px 0 18px;overflow-wrap:anywhere}.detail-tabs{display:flex;gap:24px;border-bottom:1px solid var(--line)}.detail-tabs button{border:0;border-radius:0;padding:12px 0;background:transparent;color:var(--muted)}.detail-tabs button[aria-selected=true]{border-bottom:2px solid var(--blue);color:var(--blue)}.detail-body{flex:1;min-height:0;display:flex;flex-direction:column;padding:18px 28px 22px}.log-toolbar{flex-shrink:0;margin-bottom:12px}.log-toolbar select{padding:7px}.log-status{font-size:11px;color:var(--muted);margin:0 0 10px;flex-shrink:0}pre{flex:1;min-height:0;margin:0;overflow:auto;padding:20px;background:#111a27;color:#d7e4f3;border-radius:8px;font:12px/1.7 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;overscroll-behavior:contain}.detail-info{overflow:auto;flex:1;min-height:0}.detail-info dl{display:grid;grid-template-columns:150px minmax(0,1fr);gap:14px;font-size:13px}.detail-info dt{color:var(--muted)}.detail-info dd{margin:0;overflow-wrap:anywhere}.port-card{width:min(100%,520px);margin:35px auto;padding:28px;border:1px solid var(--line);border-radius:12px}.port-card label{font-size:13px;font-weight:600;display:block;margin-bottom:8px}.port-card input{width:100%;padding:12px}.port-card button{margin-top:18px}.port-card output{display:block;font-size:13px;line-height:1.7;overflow-wrap:anywhere;margin-top:18px}.port-card output a{display:block;margin-top:8px}.port-card h1{margin-bottom:8px}.routes-list>div{padding:12px 0;border-bottom:1px solid var(--line);font-size:13px;line-height:1.8}
+@media(prefers-color-scheme:dark){:root{color:#d7e1ed;background:#141c27;--panel:#182230;--sidebar:#131e2c;--line:#2a3748;--muted:#95a7bd;--soft:#223951}.sidebar button[aria-selected=true]{background:#203e5c;color:#84c3ff}.topbar{background:#0c1c2f}.badge.running{color:#77d4a2}}
+@media(max-width:760px){.layout{grid-template-columns:62px minmax(0,1fr)}.sidebar{padding:20px 6px}.sidebar button{justify-content:center;padding:12px 8px}.nav-text,.nav-label,.sidebar-note{display:none}.view-head,.detail-head{padding:18px 16px 12px}.scroll-area{padding:0 16px 18px}.detail-body{padding:14px 16px}.summary{gap:18px}.summary strong{font-size:16px}.topbar{padding:0 14px}.topbar small{display:none}th,td{padding:12px 10px}.table-wrap{min-width:670px}.port-card{padding:20px}.headline{align-items:flex-start}.actions{flex-wrap:wrap}}
+:root{color-scheme:dark;color:#dce6f2;background:#0f141b;--panel:#0f141b;--sidebar:#111922;--line:#303b48;--muted:#899bad;--blue:#2b91ff;--soft:#172b40}.topbar{background:#101f32}.sidebar button[aria-selected=true]{background:#17334f;color:#76baff}.view-head{padding:22px 24px 14px}.scroll-area{padding:0 24px 20px}.summary{margin-top:14px;padding-top:12px;gap:50px}.summary strong{font-size:17px;color:#38c2ad}.summary span{font-size:11px}.table-wrap{border:0;border-radius:0}table{font-size:12px}th,td{padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap}td{max-width:290px;overflow:hidden;text-overflow:ellipsis}th{background:var(--panel);border-right:1px solid var(--line);font-size:11px}th:last-child{border-right:0}#containers-view th:first-child,.state-cell{width:25px;padding:9px 4px}#containers-view th:nth-child(2){width:20%}#containers-view th:last-child{width:85px}.child td:first-child{padding-left:4px}.child td:nth-child(2){padding-left:32px}.badge{font-size:0;gap:0}.badge:before{width:7px;height:7px}.project{background:transparent}.mono{font-family:ui-monospace,monospace;font-size:11px}.image-cell{color:var(--blue)}.actions button{border:0;background:transparent;color:var(--blue);padding:2px 5px;min-width:25px}.actions button:hover{background:var(--soft)}.actions button.danger-icon{color:#e77180}.project .disclosure{color:#dce6f2}.name-button{color:#dce6f2;font-size:12px}.log-line{display:block;min-height:1.7em}.log-time{color:#72869e}.log-error{color:#ff8791}.log-warn{color:#f0c46a}.log-info{color:#87c7f5}.log-debug{color:#91a1b5}dialog{width:min(480px,calc(100vw - 32px));border:1px solid var(--line);border-radius:12px;background:var(--sidebar);color:inherit;padding:26px}dialog::backdrop{background:#0009}.delete-name{font:12px/1.6 ui-monospace,monospace;overflow-wrap:anywhere;color:#c1d7ef}.dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}button.danger{background:#b84050;color:white;border-color:#b84050}
+@media(max-width:760px){.table-wrap{min-width:980px}.summary{gap:18px;flex-wrap:wrap}.summary strong{font-size:14px}.view-head{padding:18px 16px 12px}.scroll-area{padding:0 16px 18px}}
 </style></head><body>
-<main><nav role="tablist" aria-label="Личная панель"><button id="ports-tab" role="tab" aria-selected="true" aria-controls="ports-panel">Порты</button><button id="dashboard-tab" role="tab" aria-selected="false" aria-controls="dashboard-panel" tabindex="-1">Контейнеры и логи</button></nav>
-<section id="ports-panel" role="tabpanel" aria-labelledby="ports-tab"><form id="ports-form"><div class="brand">Helios Container</div><h1>Откройте backend</h1><p>Укажите порты приложения — получите HTTPS-адреса для вашего frontend.</p>
-<label for="ports">Порты backend</label><input id="ports" name="ports" placeholder="8080, 8081, host:3000" autocomplete="off" maxlength="160" aria-describedby="hint">
-<small id="hint">8080 — порт внутри VM. host:3000 — порт вашего процесса на helios. Пустое поле закрывает все адреса.</small>
-<button type="submit">Сохранить порты</button><output id="result" aria-live="polite"></output></form></section>
-<section id="dashboard-panel" role="tabpanel" aria-labelledby="dashboard-tab" hidden><header class="desktop-head"><div class="brand">Helios Container · Personal</div><h1>Контейнеры</h1><p>Ваши приложения, ресурсы и логи в одном месте.</p>
-<div class="toolbar"><button id="refresh" type="button">Обновить</button><label><input id="auto" type="checkbox" checked>Polling каждые 10 секунд</label></div>
-<div class="resource-cards"><div class="resource-card"><strong id="count-card">—</strong><span>Контейнеры · запущено / всего</span></div><div class="resource-card"><strong id="cpu-card">—</strong><span>CPU выделено VM</span></div><div class="resource-card"><strong id="memory-card">—</strong><span>RAM выделено VM</span></div></div><div id="dashboard-status" class="summary" role="status"></div></header>
-<div class="desktop-content"><div class="toolbar"><input id="search" class="search" type="search" placeholder="Поиск контейнера или образа" aria-label="Поиск контейнера или образа"><label><input id="running-only" type="checkbox">Только запущенные</label></div><div class="table-wrap"><table><thead><tr><th>Имя / образ</th><th>Статус</th><th>CPU / RAM</th><th>Порты / протокол</th><th></th></tr></thead><tbody id="containers"></tbody></table></div><div id="filter-result" class="notice"></div>
-<h2>Опубликованные адреса</h2><div id="routes"></div><div class="notice">Браузер → HTTPS → PHP-шлюз → HTTP backend. Открытый TCP-порт не определяет протокол приложения. Протокол и polling контейнера показываются по его labels. WebSocket и SSE через этот шлюз не поддерживаются. Polling панели работает через обычные HTTPS-запросы.</div>
-<div id="log-panel" hidden><h2 id="log-title">Логи</h2><div class="toolbar"><label for="tail">Последние строки</label><select id="tail"><option>100</option><option selected>200</option><option>500</option><option>1000</option></select><button id="refresh-logs" type="button">Обновить логи</button></div><div id="log-status" class="notice" role="status"></div><pre id="logs"></pre></div>
-</div></section></main>
+<main class="app"><header class="topbar"><div class="brand"><span class="brand-icon">▦</span>Helios Container</div><small>Личный Docker · FreeBSD → Linux VM</small></header>
+<div class="layout"><nav class="sidebar" role="tablist" aria-label="Личная панель" aria-orientation="vertical"><div class="nav-label">Навигация</div>
+<button id="containers-tab" role="tab" aria-selected="true" aria-controls="containers-view" title="Контейнеры"><span class="nav-icon">▦</span><span class="nav-text">Контейнеры</span></button>
+<button id="images-tab" role="tab" aria-selected="false" aria-controls="images-view" tabindex="-1" title="Образы"><span class="nav-icon">◈</span><span class="nav-text">Образы</span></button>
+<button id="volumes-tab" role="tab" aria-selected="false" aria-controls="volumes-view" tabindex="-1" title="Volumes"><span class="nav-icon">▤</span><span class="nav-text">Volumes</span></button>
+<button id="ports-tab" role="tab" aria-selected="false" aria-controls="ports-view" tabindex="-1" title="Порты"><span class="nav-icon">⇄</span><span class="nav-text">Порты</span></button>
+<div class="spacer"></div><div class="sidebar-note">Доступ по личному ключу.<br>Ресурсы вашей VM.</div></nav>
+<div class="workspace">
+<section id="containers-view" class="view" role="tabpanel" aria-labelledby="containers-tab"><header class="view-head"><div class="headline"><h1>Контейнеры</h1><div class="toolbar"><button id="refresh" class="primary">Обновить</button><label><input id="auto" type="checkbox" checked>Polling · 10 с</label></div></div><p>Проекты Compose и отдельные контейнеры.</p><div class="toolbar"><input id="search" class="search" type="search" placeholder="Поиск проекта, контейнера или образа" aria-label="Поиск контейнеров"><label><input id="running-only" type="checkbox">Только запущенные</label></div><div class="summary"><div><strong id="count-card">—</strong><span>Запущено / всего</span></div><div><strong id="cpu-card">—</strong><span id="cpu-caption">Загрузка CPU контейнеров</span></div><div><strong id="memory-card">—</strong><span>Память контейнеров / память VM</span></div></div><div id="dashboard-status" class="message" role="status"></div><div id="action-status" class="message" role="status" hidden></div></header><div class="scroll-area"><div class="table-wrap"><table><thead><tr><th aria-label="Состояние"></th><th>Имя</th><th>ID контейнера</th><th>Образ</th><th>Порты</th><th>CPU (%)</th><th>Память</th><th>Последний запуск</th><th>Действия</th></tr></thead><tbody id="containers"></tbody></table></div><div id="filter-result" class="notice"></div></div></section>
+<section id="images-view" class="view" role="tabpanel" aria-labelledby="images-tab" hidden><header class="view-head"><h1>Образы</h1><p>Локальный каталог образов в вашей VM.</p><input id="image-search" class="search" type="search" placeholder="Поиск образа" aria-label="Поиск образов"><div id="image-count" class="message"></div></header><div class="scroll-area"><div class="table-wrap"><table><thead><tr><th aria-label="Использование"></th><th>Имя</th><th>Тег</th><th>ID образа</th><th>Создан</th><th>Размер</th><th>Контейнеры</th><th>Действия</th></tr></thead><tbody id="images"></tbody></table></div><div class="notice">Образ хранится на диске. Запуск и остановка относятся к его контейнерам.</div></div></section>
+<section id="volumes-view" class="view" role="tabpanel" aria-labelledby="volumes-tab" hidden><header class="view-head"><h1>Volumes</h1><p>Тома данных и контейнеры, которые их используют.</p><input id="volume-search" class="search" type="search" placeholder="Поиск volume" aria-label="Поиск volumes"><div id="volume-count" class="message"></div></header><div class="scroll-area"><div class="table-wrap"><table><thead><tr><th aria-label="Использование"></th><th>Имя</th><th>Проект</th><th>Контейнеры</th><th>Создан</th><th>Размер</th><th>Действия</th></tr></thead><tbody id="volumes"></tbody></table></div><div class="notice">Размеры измеряются Docker в фоне не чаще раза в минуту. Удалить можно только том, не связанный с контейнерами.</div></div></section>
+<section id="ports-view" class="view" role="tabpanel" aria-labelledby="ports-tab" hidden><div class="scroll-area"><form id="ports-form" class="port-card"><h1>Порты приложения</h1><p>Получите HTTPS-адрес backend для вашего frontend.</p><label for="ports">Порты backend</label><input id="ports" name="ports" placeholder="8080, 8081, host:3000" autocomplete="off" maxlength="160"><small>8080 — порт VM. host:3000 — ваш процесс на helios. Пустое поле закрывает публичные адреса.</small><button class="primary" type="submit">Сохранить порты</button><output id="result" aria-live="polite"></output></form><h2>Опубликованные адреса</h2><div id="routes" class="routes-list"></div><p>Браузер → HTTPS → PHP-шлюз → HTTP backend. WebSocket и SSE через этот шлюз не поддерживаются. Polling панели работает через HTTPS.</p></div></section>
+<section id="detail-view" class="view" hidden><header class="detail-head"><button id="back" class="back">← Контейнеры</button><div class="headline"><h1 id="detail-title">Контейнер</h1><div id="detail-actions" class="actions"></div></div><div id="detail-meta" class="detail-meta"></div><nav class="detail-tabs" role="tablist" aria-label="Информация о контейнере"><button id="logs-tab" role="tab" aria-selected="true" aria-controls="logs-content">Логи</button><button id="info-tab" role="tab" aria-selected="false" aria-controls="info-content" tabindex="-1">Обзор</button></nav></header><div class="detail-body"><div id="logs-content" class="view" role="tabpanel" aria-labelledby="logs-tab"><div class="toolbar log-toolbar"><label for="tail">Последние строки</label><select id="tail"><option>100</option><option selected>200</option><option>500</option><option>1000</option></select><button id="refresh-logs">Обновить логи</button></div><div id="log-status" class="log-status" role="status"></div><pre id="logs"></pre></div><div id="info-content" class="detail-info" role="tabpanel" aria-labelledby="info-tab" hidden></div></div></section>
+</div></div><footer class="footer"><span id="engine-status">Docker Engine · состояние неизвестно</span><span id="operation-status" role="status">Helios Container · HTTPS polling</span></footer></main><dialog id="delete-dialog" aria-labelledby="delete-title" aria-describedby="delete-warning"><h2 id="delete-title"></h2><div id="delete-name" class="delete-name"></div><p id="delete-warning"></p><div class="dialog-actions"><button id="delete-cancel">Отмена</button><button id="delete-confirm" class="danger">Удалить</button></div></dialog>
 <script nonce="<?= $nonce ?>">
 const key = new URLSearchParams(location.hash.slice(1)).get('key') || '';
 history.replaceState(null, '', location.pathname + location.search);
-const form = document.querySelector('#ports-form'), input = document.querySelector('#ports'), button = form.querySelector('button'), result = document.querySelector('#result');
-const endpoint = new URL('index.php/_config', location.href);
-function show(data) {
-  result.replaceChildren();
-  if (data.error) { result.textContent = data.error; return; }
-  result.textContent = data.routes.length ? 'Адреса backend:' : 'Публичные адреса закрыты.';
-  for (const route of data.routes) {
-    const link = document.createElement('a');
-    link.href = new URL('index.php' + route.path, location.href).href;
-    link.textContent = link.href; link.target = '_blank'; link.rel = 'noopener'; result.append(link);
-  }
-}
-async function request(method, body) {
-  const response = await fetch(endpoint, {method, headers: {'X-HC-Admin': key, 'Content-Type': 'application/json'}, body: body && JSON.stringify(body)});
-  const data = await response.json(); show(data); return data;
-}
-form.addEventListener('submit', async event => {
-  event.preventDefault(); button.disabled = true; result.textContent = 'Настраиваю доступ…';
-  try { await request('POST', {ports: input.value}); }
-  catch { result.textContent = 'Шлюз недоступен. Выполните helios-container web start.'; }
-  finally { button.disabled = false; }
-});
-if (key) request('GET').then(data => { if (!data.error) input.value = data.ports; }).catch(() => { result.textContent = 'Запустите шлюз: helios-container web start.'; });
-else result.textContent = 'Для настройки откройте приватную ссылку из helios-container web info.';
-const status = document.querySelector('#dashboard-status'), refresh = document.querySelector('#refresh');
-let activeTab = 'ports', busy = false, selectedLog = '', logBusy = false;
-function element(tag, text) { const node = document.createElement(tag); node.textContent = text; return node; }
-async function privateGet(path) {
+const $ = selector => document.querySelector(selector);
+let activeView = 'containers', snapshot = null, busy = false, selected = '', logBusy = false, pending = '', actionBusy = false;
+const collapsed = new Set(), views = ['containers','images','volumes','ports'];
+let deleteTarget = null;
+const relative = new Intl.RelativeTimeFormat('ru', {numeric:'auto'});
+function bytesText(bytes) { if (bytes == null) return '—'; const units=['Б','КиБ','МиБ','ГиБ','ТиБ']; let n=Number(bytes), index=0; while(n>=1024 && index<4){n/=1024;index++;} return n.toLocaleString('ru-RU',{maximumFractionDigits:index>1?2:0}) + ' ' + units[index]; }
+function age(value) { if (!value || value.startsWith('0001-')) return 'Не запускался'; const stamp=Date.parse(value); if (!Number.isFinite(stamp)) return value; const seconds=(stamp-Date.now())/1000; for (const [unit,scale] of [['year',31536000],['month',2592000],['day',86400],['hour',3600],['minute',60]]) if (Math.abs(seconds)>=scale) return relative.format(Math.round(seconds/scale),unit); return relative.format(Math.round(seconds),'second'); }
+const stateNames = {running:'Запущен',exited:'Остановлен',created:'Создан',paused:'Приостановлен',restarting:'Перезапуск',dead:'Ошибка'};
+function el(tag, text='') { const node = document.createElement(tag); node.textContent = text; return node; }
+function badge(state, text) { const node = el('span', text || stateNames[state] || state); node.className = 'badge ' + state; return node; }
+function empty(body, columns, text) { const row = el('tr'), cell = el('td', text); cell.colSpan = columns; cell.className = 'empty'; row.append(cell); body.append(row); }
+async function api(path, method='GET', body) {
   if (!key) throw new Error('Откройте приватную ссылку из helios-container web info.');
-  const response = await fetch(new URL('index.php/' + path, location.href), {headers: {'X-HC-Admin': key}, cache: 'no-store'});
-  const data = await response.json();
-  if (!response.ok || data.error && !data.vm) throw new Error(data.error || 'Шлюз недоступен.');
-  return data;
+  const response = await fetch(new URL('index.php/' + path, location.href), {method,headers:{'X-HC-Admin':key,'Content-Type':'application/json'},body:body && JSON.stringify(body),cache:'no-store'});
+  const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Шлюз недоступен.'); return data;
 }
-async function loadLogs(ident, name) {
-  if (logBusy) return;
-  if (ident) { selectedLog = ident; document.querySelector('#log-title').textContent = 'Логи · ' + name; }
-  if (!selectedLog) return;
-  logBusy = true; document.querySelector('#refresh-logs').disabled = true;
-  document.querySelector('#log-panel').hidden = false;
-  const message = document.querySelector('#log-status'); message.textContent = 'Загружаю…';
-  try {
-    const data = await privateGet('_logs?' + new URLSearchParams({id: selectedLog, tail: document.querySelector('#tail').value}));
-    document.querySelector('#logs').textContent = data.text || 'Лог пуст.';
-    message.textContent = (data.truncated ? 'Показан конец лога, максимум 128 КиБ. ' : '') + 'Обновлено ' + new Date().toLocaleTimeString('ru-RU');
-  } catch (error) { message.textContent = error.message; }
-  finally { logBusy = false; document.querySelector('#refresh-logs').disabled = false; }
-}
-async function loadDashboard() {
-  if (busy || document.hidden || activeTab !== 'dashboard') return;
-  busy = true; refresh.disabled = true; status.textContent = 'Обновляю состояние…';
-  try {
-    const data = await privateGet('_dashboard');
-    document.querySelector('#count-card').textContent = data.containers.filter(item => item.State === 'running').length + ' / ' + data.containers.length;
-    document.querySelector('#cpu-card').textContent = data.vm.cpus + ' vCPU';
-    document.querySelector('#memory-card').textContent = (data.vm.memory_mib / 1024).toLocaleString('ru-RU') + ' ГиБ';
-    status.textContent = `VM ${data.vm.running ? 'запущена' : 'остановлена'} · ${data.vm.cpus} vCPU · ${data.vm.memory_mib} МиБ RAM · ${new Date(data.updated_at * 1000).toLocaleTimeString('ru-RU')}`;
-    status.classList.toggle('error', Boolean(data.error));
-    if (data.error) status.append(element('div', data.error));
-    const rows = document.querySelector('#containers'); rows.replaceChildren();
-    for (const item of data.containers) {
-      const tr = element('tr', ''), name = element('td', item.Names); tr.dataset.search = (item.Names + ' ' + item.Image).toLowerCase(); tr.dataset.state = item.State;
-      name.append(element('small', item.Image), element('small', item.ID.slice(0, 12)));
-      const state = element('td', ''), badge = element('span', ({running:'Запущен',exited:'Остановлен',created:'Создан',paused:'Приостановлен',restarting:'Перезапуск',dead:'Ошибка'}[item.State] || item.State)); badge.className = 'badge ' + item.State; state.append(badge, element('small', item.Status));
-      const metrics = element('td', 'CPU ' + (item.metrics.CPUPerc || '—'));
-      metrics.append(element('small', 'RAM ' + (item.metrics.MemUsage || '—')), element('small', 'Сеть ' + (item.metrics.NetIO || '—')), element('small', 'Диск I/O ' + (item.metrics.BlockIO || '—')), element('small', 'Процессов ' + (item.metrics.PIDs || '—')));
-      const ports = element('td', item.Ports || 'Не опубликованы');
-      ports.append(element('small', 'Приложение: ' + (item.protocol === 'unknown' ? 'не указан' : item.protocol.toUpperCase())), element('small', 'Polling: ' + ({true:'заявлен',false:'не используется',unknown:'не указан'}[item.polling])));
-      const cell = element('td', ''), open = element('button', 'Смотреть'); open.type = 'button'; open.addEventListener('click', () => loadLogs(item.ID, item.Names)); cell.append(open);
-      tr.append(name, state, metrics, ports, cell); rows.append(tr);
-    }
-    applyFilters();
-    if (!data.containers.length) { const row = element('tr', ''); const cell = element('td', data.error || (data.vm.running ? 'Контейнеров пока нет.' : 'Панель не запускает VM автоматически.')); cell.colSpan = 5; row.append(cell); rows.append(row); }
-    const routes = document.querySelector('#routes'); routes.replaceChildren();
-    for (const route of data.routes) {
-      const line = element('div', `${route.kind === 'host' ? 'Процесс на helios' : 'Порт VM'} ${route.port} · ${route.listening ? 'TCP слушает' : 'TCP недоступен'} · `);
-      const link = element('a', 'HTTPS-адрес'); link.href = new URL('index.php' + route.path, location.href).href; link.target = '_blank'; link.rel = 'noopener'; line.append(link); routes.append(line);
-    }
-    if (!data.routes.length) routes.textContent = 'Адреса не опубликованы. Добавьте их во вкладке «Порты».';
-  } catch (error) { status.textContent = error.message; status.classList.add('error'); document.querySelector('#containers').replaceChildren(); document.querySelector('#routes').replaceChildren(); for (const id of ['count-card', 'cpu-card', 'memory-card']) document.querySelector('#' + id).textContent = '—'; document.querySelector('#filter-result').textContent = ''; }
-  finally { busy = false; refresh.disabled = false; }
-}
-function selectTab(name) {
-  activeTab = name;
-  for (const current of ['ports', 'dashboard']) {
-    const tab = document.querySelector('#' + current + '-tab'); tab.setAttribute('aria-selected', String(current === name)); tab.tabIndex = current === name ? 0 : -1;
-    document.querySelector('#' + current + '-panel').hidden = current !== name;
+function actions(kind, id, running) {
+  const box = el('div'); box.className = 'actions';
+  for (const [action, title] of [[running ? 'stop' : 'start',running ? 'Остановить' : 'Запустить'],['restart','Перезапустить']]) {
+    const button = el('button',({start:'▶',stop:'■',restart:'↻'}[action])); button.type = 'button'; button.title = title; button.setAttribute('aria-label',title); button.disabled = Boolean(pending || actionBusy); button.addEventListener('click', () => runAction(kind,id,action)); box.append(button);
   }
-  if (name === 'dashboard') loadDashboard();
+  return box;
 }
-for (const name of ['ports', 'dashboard']) {
-  const tab = document.querySelector('#' + name + '-tab');
-  tab.addEventListener('click', () => selectTab(name));
-  tab.addEventListener('keydown', event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const next = event.key === 'Home' ? 'ports' : event.key === 'End' ? 'dashboard' : name === 'ports' ? 'dashboard' : 'ports'; selectTab(next); document.querySelector('#' + next + '-tab').focus(); } });
+function actionStatus(text) { $('#action-status').hidden = false; $('#action-status').textContent = text; $('#operation-status').textContent = text; }
+async function runAction(kind,id,action,extra={}) {
+  if (pending || actionBusy) return;
+  actionBusy = true; actionStatus('Отправляю команду…'); render();
+  try { const job = await api('_action','POST',{kind,id,action,...extra}); pending = job.id; actionStatus('Выполняется ' + ({start:'запуск',stop:'остановка',restart:'перезапуск',delete:'удаление'}[action]) + '…'); await pollAction(); }
+  catch (error) { actionStatus(error.message); }
+  finally { actionBusy = false; render(); }
 }
-refresh.addEventListener('click', loadDashboard);
-function applyFilters() {
-  const query = document.querySelector('#search').value.trim().toLowerCase(), running = document.querySelector('#running-only').checked;
-  const rows = document.querySelectorAll('#containers tr[data-search]'); let visible = 0;
-  for (const row of rows) { row.hidden = !row.dataset.search.includes(query) || running && row.dataset.state !== 'running'; if (!row.hidden) visible++; }
-  document.querySelector('#filter-result').textContent = rows.length && !visible ? 'По вашему фильтру контейнеров нет.' : '';
+async function pollAction() {
+  if (!pending) return;
+  try { const job = await api('_action?' + new URLSearchParams({id:pending})); if (job.status !== 'running') { pending = ''; actionStatus(job.error || 'Операция завершена. Приложение может ещё загружаться.'); await refresh(); render(); } }
+  catch (error) { pending = ''; actionStatus(error.message); render(); }
 }
-document.querySelector('#search').addEventListener('input', applyFilters);
-document.querySelector('#running-only').addEventListener('change', applyFilters);
-document.querySelector('#refresh-logs').addEventListener('click', () => loadLogs());
-document.querySelector('#tail').addEventListener('change', () => loadLogs());
-setInterval(() => { if (document.querySelector('#auto').checked) loadDashboard(); }, 10000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) loadDashboard(); });
+function portText(value) {
+  const parts=value.split(',').map(x=>x.trim()), mapped=parts.filter(x=>x.includes('->'));
+  return [...new Set((mapped.length?mapped:parts).map(x=>x.replace(/^(?:[0-9.]+|\[::\]):/,'')))].join(', ') || '—';
+}
+function containerRow(item, child) {
+  const row=el('tr'); if(child) row.className='child';
+  const state=el('td'); state.className='state-cell'; const dot=badge(item.State,''); dot.textContent=''; dot.title=(stateNames[item.State] || item.State) + ' · ' + item.Status; dot.setAttribute('aria-label',dot.title); state.append(dot);
+  const name=el('td'), open=el('button',item.service || item.Names); open.className='name-button'; open.title=item.Names; open.addEventListener('click',()=>openContainer(item.ID)); name.append(open);
+  const id=el('td',item.ID.slice(0,12)); id.className='mono'; id.title=item.ID;
+  const image=el('td',item.Image.startsWith('sha256:')?item.Image.slice(0,19)+'…':item.Image); image.className='image-cell'; image.title=item.Image;
+  const ports=el('td',portText(item.Ports)); ports.title=item.Ports;
+  const buttons=el('td'); buttons.append(actions('container',item.ID,item.State==='running'));
+  row.append(state,name,id,image,ports,el('td',item.metrics.CPUPerc || '—'),el('td',item.metrics.MemUsage || '—'),el('td',age(item.started_at)),buttons); return row;
+}
+function renderContainers() {
+  const body = $('#containers'); body.replaceChildren(); if (!snapshot) return;
+  const query = $('#search').value.trim().toLowerCase(), runningOnly = $('#running-only').checked;
+  const visible = snapshot.containers.filter(c => (!runningOnly || c.State === 'running') && [c.Names,c.Image,c.project,c.service].join(' ').toLowerCase().includes(query));
+  const projects = new Map(); for (const item of visible) { const name = item.project || ''; if (!projects.has(name)) projects.set(name,[]); projects.get(name).push(item); }
+  for (const [project, items] of projects) {
+    if (!project) { for (const item of items) body.append(containerRow(item,false)); continue; }
+    const all = snapshot.containers.filter(c => c.project === project), count = all.filter(c => c.State === 'running').length;
+    const row = el('tr'); row.className = 'project'; const name = el('td'), toggle = el('button',(collapsed.has(project) ? '▸ ' : '▾ ') + project); toggle.className = 'disclosure'; toggle.setAttribute('aria-expanded',String(!collapsed.has(project))); toggle.addEventListener('click',() => { collapsed.has(project) ? collapsed.delete(project) : collapsed.add(project); renderContainers(); });
+    name.append(toggle); name.title='Проект Compose · ' + all.length + ' контейнеров'; const state = el('td'); state.className='state-cell'; const dot=badge(count?'running':'exited',''); dot.textContent=''; dot.title=count+' / '+all.length+' запущено'; dot.setAttribute('aria-label',dot.title); state.append(dot);
+    const cpu = el('td',count ? all.reduce((sum,c) => sum + (parseFloat(c.metrics.CPUPerc) || 0),0).toFixed(2) + '%' : '—'); const used = all.reduce((sum,c) => { const match = (c.metrics.MemUsage || '').match(/^([0-9.]+)([A-Za-z]+)\s*\//); return sum + (match ? Number(match[1]) * ({B:1,KiB:1024,MiB:1048576,GiB:1073741824,kB:1000,MB:1000000,GB:1000000000}[match[2]] || 0) : 0); },0); const memory = el('td',count ? (used / 1048576).toLocaleString('ru-RU',{maximumFractionDigits:1}) + ' МиБ' : '—'); const ports = el('td','—'); const buttons = el('td'); buttons.append(actions('project',project,count > 0)); row.append(state,name,el('td','—'),el('td','—'),ports,cpu,memory,el('td','—'),buttons); body.append(row);
+    if (!collapsed.has(project)) for (const item of items) body.append(containerRow(item,true));
+  }
+  $('#filter-result').textContent = '';
+  if (!visible.length) empty(body,9,snapshot.error || (snapshot.vm.running ? 'Контейнеров по этому фильтру нет.' : 'VM остановлена. Выполните helios-container start.'));
+}
+function removeButton(kind,item) {
+  const id=kind==='image'?item.ID:item.Name, reference=kind==='image'?(item.Repository==='<none>'||item.Tag==='<none>'?item.ID:item.Repository+':'+item.Tag):item.Name;
+  const button=el('button','×'); button.className='danger-icon'; button.type='button'; button.title='Удалить'; button.setAttribute('aria-label','Удалить '+reference); button.disabled=Boolean(item.containers.length || pending || actionBusy);
+  if(item.containers.length) button.title='Используется контейнерами, включая остановленные';
+  button.addEventListener('click',()=>{deleteTarget={kind,id,reference}; $('#delete-title').textContent=kind==='image'?'Удалить образ?':'Удалить volume?'; $('#delete-name').textContent=reference; $('#delete-warning').textContent=kind==='image'?'Этот образ или тег будет удалён из вашей VM. Для повторного запуска может потребоваться загрузка или сборка.':'Все данные этого тома будут удалены без возможности восстановления. Остановка контейнера не удаляет его связь с томом.'; $('#delete-dialog').showModal(); $('#delete-cancel').focus();}); return button;
+}
+function renderImages() {
+  const body=$('#images'); body.replaceChildren(); if(!snapshot) return; const query=$('#image-search').value.toLowerCase();
+  const images=snapshot.images.filter(i=>(i.Repository+':'+i.Tag+' '+i.ID).toLowerCase().includes(query));
+  const unique=new Map(snapshot.images.map(i=>[i.ID,i.size_bytes])); $('#image-count').textContent=unique.size+' образов · суммарный размер '+bytesText([...unique.values()].reduce((a,b)=>a+(b || 0),0))+' (общие слои учитываются повторно)';
+  for(const item of images){const row=el('tr'), state=el('td'); state.className='state-cell'; const dot=badge(item.containers.length?'running':'exited',''); dot.textContent=''; dot.title=item.containers.length?'Используется':'Не используется'; state.append(dot); const buttons=el('td'); buttons.append(removeButton('image',item)); row.append(state,el('td',item.Repository),el('td',item.Tag),el('td',item.ID.replace('sha256:','').slice(0,12)),el('td',age(item.CreatedAt)),el('td',bytesText(item.size_bytes)),el('td',item.containers.join(', ') || '—'),buttons); body.append(row);}
+  if(!images.length) empty(body,8,snapshot.error || (snapshot.vm.running?'Образов по этому фильтру нет.':'VM остановлена. Каталог доступен после запуска.'));
+}
+function renderVolumes() {
+  const body=$('#volumes'); body.replaceChildren(); if(!snapshot) return; const query=$('#volume-search').value.toLowerCase();
+  const volumes=snapshot.volumes.filter(v=>(v.Name+' '+v.project).toLowerCase().includes(query));
+  const measured=snapshot.volumes.filter(v=>v.size_bytes!=null), total=measured.reduce((sum,v)=>sum+v.size_bytes,0); $('#volume-count').textContent=snapshot.volumes.length+' томов · '+(measured.length===snapshot.volumes.length?bytesText(total):'Размеры рассчитываются…')+(snapshot.storage.updated_at?' · измерено '+age(new Date(snapshot.storage.updated_at*1000).toISOString()):'');
+  if(snapshot.storage.error) $('#volume-count').textContent += ' · '+snapshot.storage.error;
+  for(const item of volumes){const row=el('tr'), state=el('td'); state.className='state-cell'; const dot=badge(item.containers.length?'running':'exited',''); dot.textContent=''; dot.title=item.containers.length?'Используется':'Не используется'; state.append(dot); const buttons=el('td'); buttons.append(removeButton('volume',item)); row.append(state,el('td',item.Name),el('td',item.project || '—'),el('td',item.containers.join(', ') || '—'),el('td',item.CreatedAt?age(item.CreatedAt):'—'),el('td',bytesText(item.size_bytes)),buttons); body.append(row);}
+  if(!volumes.length) empty(body,7,snapshot.error || (snapshot.vm.running?'Томов по этому фильтру нет.':'VM остановлена. Каталог доступен после запуска.'));
+}
+function renderRoutes() {
+  const root = $('#routes'); root.replaceChildren(); if (!snapshot) return;
+  for (const route of snapshot.routes) { const line = el('div',`${route.kind === 'host' ? 'Процесс helios' : 'Порт VM'} ${route.port} · ${route.listening ? 'TCP слушает' : 'TCP недоступен'} · `); const link = el('a','Открыть HTTPS'); link.href = new URL('index.php' + route.path,location.href).href; link.target = '_blank'; link.rel = 'noopener'; line.append(link); root.append(line); }
+  if (!snapshot.routes.length) root.textContent = 'Публичные адреса закрыты.';
+}
+function renderDetail() {
+  const item = snapshot && snapshot.containers.find(c => c.ID === selected); if (!item) return;
+  $('#detail-title').textContent = item.Names; $('#detail-meta').textContent = [stateNames[item.State] || item.State,item.Image,item.ID.slice(0,12)].join(' · '); $('#detail-actions').replaceChildren(actions('container',item.ID,item.State === 'running'));
+  const info = $('#info-content'); info.replaceChildren(); const list = el('dl');
+  const values = [['ID',item.ID],['Образ',item.Image],['Проект Compose',item.project || '—'],['Сервис',item.service || '—'],['Состояние',item.Status],['Порты',item.Ports || '—'],['Протокол',item.protocol === 'unknown' ? 'Не указан' : item.protocol],['Polling приложения',({true:'Заявлен',false:'Не используется',unknown:'Не указан'}[item.polling])],['CPU',item.metrics.CPUPerc || '—'],['Память',item.metrics.MemUsage || '—'],['Сеть I/O',item.metrics.NetIO || '—'],['Диск I/O',item.metrics.BlockIO || '—'],['Процессы',item.metrics.PIDs || '—']];
+  for (const [name,value] of values) list.append(el('dt',name),el('dd',value));
+  for (const mount of item.mounts) list.append(el('dt',mount.Type === 'volume' ? 'Volume' : 'Mount'),el('dd',(mount.Name || mount.Type) + ' → ' + mount.Destination + (mount.RW ? ' · rw' : ' · ro')));
+  info.append(list,el('p','Протокол и polling приложения заявляются через labels контейнера. Номер TCP-порта не определяет протокол.'));
+}
+function render() { renderContainers(); renderImages(); renderVolumes(); renderRoutes(); renderDetail(); }
+async function refresh() {
+  if (busy || document.hidden) return; busy = true; $('#refresh').disabled = true;
+  try { snapshot = await api('_dashboard'); $('#count-card').textContent = snapshot.containers.filter(c => c.State === 'running').length + ' / ' + snapshot.containers.length; $('#cpu-card').textContent = snapshot.resources.cpu_percent.toLocaleString('ru-RU',{maximumFractionDigits:2}) + '% / ' + snapshot.resources.cpu_capacity_percent + '%'; $('#cpu-caption').textContent = 'Загрузка CPU контейнеров · доступно ' + snapshot.vm.cpus + ' vCPU'; $('#memory-card').textContent = (snapshot.resources.memory_used_bytes/1073741824).toLocaleString('ru-RU',{maximumFractionDigits:2}) + ' ГиБ / ' + (snapshot.resources.memory_total_bytes/1073741824).toLocaleString('ru-RU',{maximumFractionDigits:2}) + ' ГиБ'; $('#dashboard-status').textContent = snapshot.error || 'Обновлено ' + new Date(snapshot.updated_at * 1000).toLocaleTimeString('ru-RU'); $('#dashboard-status').classList.toggle('error',Boolean(snapshot.error)); $('#engine-status').textContent = 'Docker Engine · ' + (snapshot.error ? 'недоступен' : snapshot.vm.running ? 'VM запущена' : 'VM остановлена'); render(); }
+  catch (error) { $('#dashboard-status').textContent = error.message; $('#dashboard-status').classList.add('error'); $('#engine-status').textContent = 'Docker Engine · нет доступа'; }
+  finally { busy = false; $('#refresh').disabled = false; }
+}
+function selectView(name) { activeView = name; for (const current of views) { $('#' + current + '-view').hidden = current !== name; const tab = $('#' + current + '-tab'); tab.setAttribute('aria-selected',String(current === name)); tab.tabIndex = current === name ? 0 : -1; } $('#detail-view').hidden = true; selected = ''; if (name !== 'ports' || !snapshot) refresh(); }
+function detailTab(name) { for (const current of ['logs','info']) { $('#' + current + '-content').hidden = current !== name; const button = $('#' + current + '-tab'); button.setAttribute('aria-selected',String(current === name)); button.tabIndex = current === name ? 0 : -1; } }
+function openContainer(id) { selected = id; activeView = 'detail'; for (const name of views) $('#' + name + '-view').hidden = true; $('#detail-view').hidden = false; $('#logs').textContent = ''; detailTab('logs'); renderDetail(); loadLogs(); }
+function highlightLogs(text) {
+  const root=$('#logs'), bottom=root.scrollHeight-root.scrollTop-root.clientHeight<40 || !root.textContent;
+  const fragment=document.createDocumentFragment();
+  for(const raw of text.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g,'').split('\n')){
+    const line=el('span'); line.className='log-line';
+    const level=/\b(ERROR|FATAL|SEVERE|PANIC|EXCEPTION)\b/i.test(raw)||/HTTP\/[0-9.]+"\s+5[0-9]{2}/.test(raw)?'error':/\b(WARN|WARNING)\b/i.test(raw)||/HTTP\/[0-9.]+"\s+4[0-9]{2}/.test(raw)?'warn':/\b(INFO|NOTICE)\b/i.test(raw)||/HTTP\/[0-9.]+"\s+2[0-9]{2}/.test(raw)?'info':/\b(DEBUG|TRACE)\b/i.test(raw)?'debug':'';
+    if(level) line.classList.add('log-'+level);
+    const stamp=raw.match(/^(\d{4}-\d{2}-\d{2}T[0-9:.]+Z)\s*/);
+    if(stamp){const time=el('span',stamp[0]); time.className='log-time'; line.append(time,document.createTextNode(raw.slice(stamp[0].length)));}else line.textContent=raw;
+    fragment.append(line);
+  }
+  root.replaceChildren(fragment); if(bottom) root.scrollTop=root.scrollHeight;
+}
+async function loadLogs() { if (logBusy || !selected) return; logBusy = true; const id = selected; $('#refresh-logs').disabled = true; $('#log-status').textContent = 'Загружаю…'; try { const data = await api('_logs?' + new URLSearchParams({id,tail:$('#tail').value})); if (id !== selected) return; highlightLogs(data.text || 'Лог пуст.'); $('#log-status').textContent = (data.truncated ? 'Конец лога, максимум 128 КиБ. ' : '') + 'Обновлено ' + new Date().toLocaleTimeString('ru-RU'); } catch (error) { if (id === selected) $('#log-status').textContent = error.message; } finally { logBusy = false; $('#refresh-logs').disabled = false; } }
+for (const [index,name] of views.entries()) { const tab = $('#' + name + '-tab'); tab.addEventListener('click',() => selectView(name)); tab.addEventListener('keydown',event => { if (['ArrowUp','ArrowDown','Home','End'].includes(event.key)) { event.preventDefault(); const next = event.key === 'Home' ? 0 : event.key === 'End' ? views.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + views.length) % views.length; selectView(views[next]); $('#' + views[next] + '-tab').focus(); } }); }
+$('#delete-cancel').addEventListener('click',()=>{$('#delete-dialog').close(); deleteTarget=null;}); $('#delete-confirm').addEventListener('click',()=>{if(!deleteTarget)return; const target=deleteTarget; deleteTarget=null; $('#delete-dialog').close(); runAction(target.kind,target.id,'delete',{reference:target.reference,confirm:target.reference});});
+$('#back').addEventListener('click',() => selectView('containers')); $('#logs-tab').addEventListener('click',() => detailTab('logs')); $('#info-tab').addEventListener('click',() => detailTab('info'));
+$('#refresh').addEventListener('click',refresh); $('#search').addEventListener('input',renderContainers); $('#running-only').addEventListener('change',renderContainers); $('#image-search').addEventListener('input',renderImages); $('#volume-search').addEventListener('input',renderVolumes); $('#refresh-logs').addEventListener('click',loadLogs); $('#tail').addEventListener('change',loadLogs);
+function showConfig(data) { const result = $('#result'); result.replaceChildren(); result.textContent = data.routes.length ? 'Адреса backend:' : 'Публичные адреса закрыты.'; for (const route of data.routes) { const link = el('a',new URL('index.php' + route.path,location.href).href); link.href = link.textContent; link.target = '_blank'; link.rel = 'noopener'; result.append(link); } }
+$('#ports-form').addEventListener('submit',async event => { event.preventDefault(); const button = event.currentTarget.querySelector('button'); button.disabled = true; try { showConfig(await api('_config','POST',{ports:$('#ports').value})); await refresh(); } catch (error) { $('#result').textContent = error.message; } finally { button.disabled = false; } });
+if (key) api('_config').then(data => { $('#ports').value = data.ports; showConfig(data); }).catch(error => { $('#result').textContent = error.message; }); else $('#result').textContent = 'Откройте приватную ссылку из helios-container web info.';
+refresh(); setInterval(() => { if (!document.hidden) { if (pending) pollAction(); else if ($('#auto').checked) { refresh(); if (activeView === 'detail' && !$('#logs-content').hidden) loadLogs(); } } },10000); document.addEventListener('visibilitychange',() => { if (!document.hidden) refresh(); });
 </script></body></html>
+
 <?php
     exit;
 }
 if (!ini_get('allow_url_fopen')) {
     http_response_code(503); header('Content-Type: application/json'); echo '{"error":"PHP allow_url_fopen отключён."}'; exit;
 }
-if (!preg_match('~^/(?:_config|_dashboard|_logs|(?:vm|host)/[0-9]{1,5}(?:/.*)?)$~D', $path)) {
+if (!preg_match('~^/(?:_config|_dashboard|_logs|_action|(?:vm|host)/[0-9]{1,5}(?:/.*)?)$~D', $path)) {
     http_response_code(404); exit;
 }
 if (str_starts_with(strtolower($_SERVER['CONTENT_TYPE'] ?? ''), 'multipart/form-data')) {
@@ -213,5 +232,5 @@ foreach ($meta['wrapper_data'] ?? [] as $line) {
     if (in_array($name, $hop, true) && !($name === 'content-length' && $_SERVER['REQUEST_METHOD'] === 'HEAD')) continue;
     header($line, $name !== 'set-cookie');
 }
-if (in_array($path, ['/_config', '/_dashboard', '/_logs'], true)) { header('Cache-Control: no-store'); header('Referrer-Policy: no-referrer'); }
+if (in_array($path, ['/_config', '/_dashboard', '/_logs', '/_action'], true)) { header('Cache-Control: no-store'); header('Referrer-Policy: no-referrer'); }
 if ($_SERVER['REQUEST_METHOD'] !== 'HEAD') echo $data;

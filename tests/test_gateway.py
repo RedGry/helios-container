@@ -116,6 +116,18 @@ class GatewayTests(unittest.TestCase):
             self.assertNotIn('secret', raw.decode())
         self.assertEqual(self.request('/_logs?id=--help', headers={'X-HC-Admin': 'admin-secret'})[0], 400)
 
+    def test_lifecycle_endpoint_authenticates_before_dispatch_and_only_accepts_bounded_json(self):
+        with patch.object(self.server.dashboard, 'action', return_value={'id': 'a' * 32, 'status': 'running'}) as action:
+            self.assertEqual(self.request('/_action', 'POST', '{}')[0], 401)
+            action.assert_not_called()
+            self.assertEqual(self.request('/_action', 'DELETE', headers={'X-HC-Admin': 'admin-secret'})[0], 405)
+            self.assertEqual(self.request('/_action', 'POST', 'x' * 4097, {'X-HC-Admin': 'admin-secret'})[0], 413)
+            self.assertEqual(self.request('/_action', 'POST', '{"id":"abc","action":"stop"}', {'X-HC-Admin': 'admin-secret'})[0], 202)
+            action.assert_called_once_with({'id': 'abc', 'action': 'stop'})
+        with patch.object(self.server.dashboard, 'job', return_value={'status': 'done'}) as job:
+            self.assertEqual(self.request('/_action?id=' + 'a' * 32, headers={'X-HC-Admin': 'admin-secret'})[0], 200)
+            job.assert_called_once_with('a' * 32)
+
 
 class RemovalTests(unittest.TestCase):
     def test_removal_preserves_user_files(self):
