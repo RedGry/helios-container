@@ -38,7 +38,7 @@ jobs:
             exit 1
           fi
       - run: python -m unittest discover -s tests -p test_release.py -v && node --test tests/*.cjs
-      - run: sh -n install.sh && php -l gateway.php
+      - run: sh -n install.sh && sh -n native/guest-optimize.sh && php -l gateway.php
       - name: Build native payload on FreeBSD
         uses: vmactions/freebsd-vm@c46abacb49f09938ca4e1702d15d836285d694cc # v1
         with:
@@ -50,6 +50,7 @@ jobs:
             python3.11 native/tests/lifecycle.py native/target/release/helios-container-native
             python3.11 native/tests/gateway.py native/target/release/helios-container-native
             python3.11 native/tests/update.py native/target/release/helios-container-native
+            python3.11 native/tests/web_install.py native/target/release/helios-container-native
             python3.11 tools/release.py --binary native/target/release/helios-container-native
             python3.11 tools/release.py --verify
             pw useradd helios-release-test -m -d /var/helios-release-test -s /bin/sh

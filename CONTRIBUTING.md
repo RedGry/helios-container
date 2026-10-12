@@ -13,10 +13,12 @@ sh native/build.sh
 python3 native/tests/lifecycle.py native/target/release/helios-container-native
 python3 native/tests/gateway.py native/target/release/helios-container-native
 python3 native/tests/update.py native/target/release/helios-container-native
+python3 native/tests/web_install.py native/target/release/helios-container-native
 python3 -m unittest discover -s tests -v
 node --test tests/*.cjs
 php -l gateway.php
 sh -n install.sh
+sh -n native/guest-optimize.sh
 git diff --check
 ```
 

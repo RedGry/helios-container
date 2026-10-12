@@ -23,7 +23,7 @@ jobs:
       - run: python -m unittest discover -s tests -p test_release.py -v
       - run: python tools/release.py --check
       - run: node --test tests/*.cjs
-      - run: sh -n install.sh && sh -n native/build.sh
+      - run: sh -n install.sh && sh -n native/build.sh && sh -n native/guest-optimize.sh
   release-check:
     needs: [quality, scripts]
     runs-on: ubuntu-latest
@@ -42,7 +42,12 @@ jobs:
             python3.11 native/tests/lifecycle.py native/target/release/helios-container-native
             python3.11 native/tests/gateway.py native/target/release/helios-container-native
             python3.11 native/tests/update.py native/target/release/helios-container-native
+            python3.11 native/tests/web_install.py native/target/release/helios-container-native
             python3.11 -m unittest discover -s tests -p test_release.py -v
+            pw useradd helios-install-test -m -d /var/helios-install-test -s /bin/sh
+            install -m 755 native/target/release/helios-container-native /var/helios-install-test/helios-container-native
+            install -m 644 VERSION /var/helios-install-test/VERSION
+            su -l helios-install-test -c './helios-container-native install --cpus 2 --no-profile && .local/bin/docker run --rm hello-world && .local/bin/docker compose version && .local/bin/helios-container stop && .local/bin/helios-container start && .local/bin/docker run --rm hello-world && .local/bin/helios-container uninstall --yes'
             python3.11 tools/release.py --binary native/target/release/helios-container-native
             python3.11 tools/release.py --verify
       - uses: actions/upload-artifact@v7

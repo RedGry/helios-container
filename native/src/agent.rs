@@ -207,10 +207,143 @@ pub fn ensure(base: &Path) -> Result<()> {
     Err("Шлюз не запустился. Проверьте web.log".into())
 }
 fn safe_file(path: &Path, marker: &str) -> Result<()> {
-    if fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink())
-        || path.exists() && !fs::read_to_string(path)?.contains(marker)
-    {
-        return Err("Файл не принадлежит kit. Существующие данные сохранены".into());
+    if regular_file(path)? && !fs::read_to_string(path)?.contains(marker) {
+        return Err(format!(
+            "Файл {} не принадлежит kit. Существующие данные сохранены",
+            path.display()
+        )
+        .into());
+    }
+    Ok(())
+}
+fn regular_file(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() => Ok(true),
+        Ok(_) => Err(format!(
+            "Ожидался обычный файл: {}. Существующие данные сохранены",
+            path.display()
+        )
+        .into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(format!("Не удалось проверить {}: {error}", path.display()).into()),
+    }
+}
+fn web_root() -> Result<PathBuf> {
+    let home = PathBuf::from(env::var("HOME")?);
+    let public = home.join("public_html");
+    let root = public.join("helios-container");
+    crate::install::no_links(&root)?;
+    for path in [&home, &public, &root] {
+        match fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => return Err(format!("Ожидался каталог: {}", path.display()).into()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound && path != &home => {}
+            Err(error) => {
+                return Err(format!("Не удалось проверить {}: {error}", path.display()).into())
+            }
+        }
+    }
+    Ok(root)
+}
+fn web_permissions(root: &Path) -> Result<()> {
+    let public = root.parent().ok_or("Нет каталога public_html")?;
+    let home = public.parent().ok_or("Нет домашнего каталога")?;
+    let mut errors = Vec::new();
+    for (path, required, suggested) in [
+        (home, 0o001, "711"),
+        (public, 0o005, "755"),
+        (root, 0o005, "755"),
+    ] {
+        match fs::metadata(path) {
+            Ok(metadata) => {
+                let mode = metadata.permissions().mode() & 0o7777;
+                if mode & required != required {
+                    errors.push(format!(
+                        "{}: права {mode:04o}, хостингу нужны {}. Выполните: chmod {suggested} {}",
+                        path.display(),
+                        if required == 0o001 {
+                            "проход по каталогу"
+                        } else {
+                            "чтение и проход по каталогу"
+                        },
+                        crate::quote(&path.to_string_lossy())
+                    ));
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(
+                    format!("Не удалось проверить права {}: {error}", path.display()).into(),
+                )
+            }
+        }
+    }
+    if !errors.is_empty() {
+        return Err(format!("Хостинг не сможет открыть PHP-шлюз:\n{}", errors.join("\n")).into());
+    }
+    Ok(())
+}
+fn create_web_directory(path: &Path) -> Result<()> {
+    if !path.exists() {
+        fs::create_dir(path)?;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755))?;
+    }
+    Ok(())
+}
+pub fn remove(base: &Path) -> Result<()> {
+    let root = web_root()?;
+    let state_path = base.join("web.json");
+    let has_state = regular_file(&state_path)?;
+    if has_state && text(&read_json(&state_path)?, "directory")? != root.to_string_lossy() {
+        return Err("Неизвестный каталог шлюза".into());
+    }
+    let index = root.join("index.php");
+    let access = root.join(".htaccess");
+    safe_file(&index, MARKER)?;
+    safe_file(&access, "# helios-container managed web methods")?;
+    let owned_root = has_state || index.exists() || access.exists();
+    let files = [
+        index,
+        access,
+        state_path,
+        base.join("web.pid"),
+        base.join("web.log"),
+    ];
+    for path in &files {
+        regular_file(path)?;
+    }
+    stop(base)?;
+    for path in &files {
+        if path.exists() {
+            fs::remove_file(path)?;
+        }
+    }
+    if owned_root && root.exists() && fs::read_dir(&root)?.next().is_none() {
+        fs::remove_dir(root)?;
+    }
+    println!("HTTP-шлюз удалён. Frontend и VM сохранены");
+    Ok(())
+}
+pub fn remove_owned(base: &Path) -> Result<()> {
+    let root = PathBuf::from(env::var("HOME")?).join("public_html/helios-container");
+    let has_state = ["web.json", "web.pid", "web.log"]
+        .iter()
+        .any(|name| fs::symlink_metadata(base.join(name)).is_ok());
+    let has_gateway = crate::install::no_links(&root).is_ok()
+        && [
+            (root.join("index.php"), MARKER),
+            (
+                root.join(".htaccess"),
+                "# helios-container managed web methods",
+            ),
+        ]
+        .iter()
+        .any(|(path, marker)| {
+            fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file())
+                && fs::read_to_string(path).is_ok_and(|content| content.contains(marker))
+        });
+    if has_state || has_gateway {
+        remove(base)?;
     }
     Ok(())
 }
@@ -223,25 +356,15 @@ pub fn manage(kit: &Kit, args: &[String]) -> Result<()> {
         return stop(base);
     }
     if args[0] == "install" {
-        let public = PathBuf::from(env::var("HOME")?).join("public_html");
-        let root = public.join("helios-container");
-        for p in [&public, &root] {
-            if fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink()) {
-                return Err("Каталог шлюза не должен быть ссылкой".into());
-            }
-        }
+        let root = web_root()?;
+        web_permissions(&root)?;
+        let public = root.parent().ok_or("Нет каталога public_html")?;
         let state = if base.join("web.json").exists() {
             read_json(&base.join("web.json"))?
         } else {
             if root.exists() && fs::read_dir(&root)?.next().is_some() {
                 return Err("Каталог public_html/helios-container уже занят".into());
             }
-            fs::create_dir_all(&root)?;
-            fs::set_permissions(&public, fs::Permissions::from_mode(0o755))?;
-            fs::set_permissions(&root, fs::Permissions::from_mode(0o755))?;
-            let nonce = random()?;
-            let probe = root.join(format!("probe-{nonce}.php"));
-            atomic(&probe, format!("<?php echo '{nonce}';").as_bytes(), 0o644)?;
             let user = username()?;
             if !user
                 .bytes()
@@ -250,6 +373,12 @@ pub fn manage(kit: &Kit, args: &[String]) -> Result<()> {
                 return Err("Неожиданное имя пользователя".into());
             }
             let url = format!("https://se.ifmo.ru/~{user}/helios-container/");
+            create_web_directory(public)?;
+            create_web_directory(&root)?;
+            let nonce = random()?;
+            let probe = root.join(format!("probe-{nonce}.php"));
+            atomic(&probe, format!("<?php echo '{nonce}';").as_bytes(), 0o644)?;
+            let probe_url = format!("{url}{}", probe.file_name().unwrap().to_string_lossy());
             let result = output(
                 Command::new("curl")
                     .args([
@@ -261,14 +390,21 @@ pub fn manage(kit: &Kit, args: &[String]) -> Result<()> {
                         "--max-time",
                         "20",
                     ])
-                    .arg(format!(
-                        "{url}{}",
-                        probe.file_name().unwrap().to_string_lossy()
-                    )),
+                    .arg(&probe_url),
             );
-            let _ = fs::remove_file(&probe);
-            if result? != nonce {
-                return Err("Хостинг не выполняет PHP".into());
+            fs::remove_file(&probe).map_err(|error| {
+                format!(
+                    "Не удалось удалить проверочный файл {}: {error}",
+                    probe.display()
+                )
+            })?;
+            if result.map_err(|error| format!("Проверка PHP-хостинга {probe_url}: {error}"))?
+                != nonce
+            {
+                return Err(format!(
+                    "Хостинг не выполняет PHP или вернул неожиданный ответ: {probe_url}"
+                )
+                .into());
             }
             let port = std::net::TcpListener::bind(("127.0.0.1", 0))?
                 .local_addr()?
@@ -283,6 +419,8 @@ pub fn manage(kit: &Kit, args: &[String]) -> Result<()> {
             &root.join(".htaccess"),
             "# helios-container managed web methods",
         )?;
+        create_web_directory(public)?;
+        create_web_directory(&root)?;
         let php = PHP
             .replace("__HC_PORT__", &state["agent_port"].to_string())
             .replace("__HC_BRIDGE__", text(&state, "bridge_key")?);
@@ -297,34 +435,7 @@ pub fn manage(kit: &Kit, args: &[String]) -> Result<()> {
     } else if args[0] == "start" {
         ensure(base)?;
     } else if args[0] == "remove" {
-        let state = read_json(&base.join("web.json"))?;
-        let root = PathBuf::from(text(&state, "directory")?);
-        let expected = PathBuf::from(env::var("HOME")?).join("public_html/helios-container");
-        if root != expected || fs::symlink_metadata(&root)?.file_type().is_symlink() {
-            return Err("Неизвестный каталог шлюза".into());
-        }
-        safe_file(&root.join("index.php"), MARKER)?;
-        safe_file(
-            &root.join(".htaccess"),
-            "# helios-container managed web methods",
-        )?;
-        stop(base)?;
-        for p in [
-            root.join("index.php"),
-            root.join(".htaccess"),
-            base.join("web.json"),
-            base.join("web.pid"),
-            base.join("web.log"),
-        ] {
-            if p.exists() {
-                fs::remove_file(p)?;
-            }
-        }
-        if fs::read_dir(&root)?.next().is_none() {
-            fs::remove_dir(root)?;
-        }
-        println!("HTTP-шлюз удалён. Frontend и VM сохранены");
-        return Ok(());
+        return remove(base);
     } else if args[0] != "info" {
         return Err("Неизвестная команда web".into());
     }

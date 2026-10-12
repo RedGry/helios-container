@@ -335,8 +335,7 @@ write_files:
     content: |
       #!/bin/sh
       set -eu
-      apk update
-      apk add docker docker-cli-compose openssh-client util-linux-misc
+      apk add --no-cache docker docker-cli-compose openssh-client util-linux-misc
       mkdir -p /workspace
       rc-update add cgroups boot
       rc-service cgroups start
@@ -393,6 +392,16 @@ pub(super) fn launchers(base: &Path) -> Result<()> {
         )?;
     }
     Ok(())
+}
+
+pub(super) fn optimize_guest(kit: &Kit) -> Result<()> {
+    checked(&mut kit.ssh(
+        &format!(
+            "HC_FINISH_BOOTSTRAP=1\n{}",
+            include_str!("../guest-optimize.sh")
+        ),
+        false,
+    ))
 }
 
 pub(super) fn run(args: &[String]) -> Result<()> {
@@ -555,6 +564,8 @@ pub(super) fn run(args: &[String]) -> Result<()> {
     }
     drop(lock);
     kit.start(true)?;
+    let _lease = Lease::acquire(&kit.base)?;
+    optimize_guest(&kit)?;
     println!("Готово. Выполните: . ~/.profile\nЗатем: docker run --rm hello-world");
     Ok(())
 }
