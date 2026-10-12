@@ -367,11 +367,21 @@ runcmd:
     Ok(())
 }
 
+pub(super) fn launcher(base: &Path, name: &str) -> String {
+    let args = if name == "docker" { " docker" } else { "" };
+    format!(
+        "#!/bin/sh\n# helios-container managed launcher\nexec {} --base {}{} \"$@\"\n",
+        quote(&base.join("helios-container-native").to_string_lossy()),
+        quote(&base.to_string_lossy()),
+        args
+    )
+}
+
 pub(super) fn launchers(base: &Path) -> Result<()> {
     let bin = PathBuf::from(env::var("HOME")?).join(".local/bin");
     no_links(&bin)?;
     fs::create_dir_all(&bin)?;
-    for (name, args) in [("helios-container", ""), ("docker", " docker")] {
+    for name in ["helios-container", "docker"] {
         let target = bin.join(name);
         no_links(&target)?;
         if target.exists()
@@ -379,17 +389,7 @@ pub(super) fn launchers(base: &Path) -> Result<()> {
         {
             return Err(format!("{} не принадлежит kit", target.display()).into());
         }
-        atomic(
-            &target,
-            format!(
-                "#!/bin/sh\n# helios-container managed launcher\nexec {} --base {}{} \"$@\"\n",
-                quote(&base.join("helios-container-native").to_string_lossy()),
-                quote(&base.to_string_lossy()),
-                args
-            )
-            .as_bytes(),
-            0o700,
-        )?;
+        atomic(&target, launcher(base, name).as_bytes(), 0o700)?;
     }
     Ok(())
 }

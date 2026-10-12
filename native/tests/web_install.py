@@ -22,6 +22,7 @@ class WebInstallation(unittest.TestCase):
         self.home.mkdir(mode=0o711)
         self.home.chmod(0o711)
         self.base = self.home / 'kit'
+        self.bases = [self.base]
         self.base.mkdir()
         (self.base / 'vm').mkdir()
         shutil.copy2(BINARY, self.base / 'helios-container-native')
@@ -60,17 +61,36 @@ class WebInstallation(unittest.TestCase):
 
     def tearDown(self):
         self.home.chmod(0o711)
-        subprocess.run([str(BINARY), '--base', str(self.base), 'web', 'stop'],
-                       env=self.env, capture_output=True, timeout=15)
+        for base in self.bases:
+            if base.exists():
+                subprocess.run([str(BINARY), '--base', str(base), 'web', 'stop'],
+                               env=self.env, capture_output=True, timeout=15)
         self.temp.cleanup()
 
-    def run_web(self, command, success=True, private_umask=False):
+    def make_base(self, name):
+        base = self.home / name
+        base.mkdir()
+        (base / 'vm').mkdir()
+        shutil.copy2(BINARY, base / 'helios-container-native')
+        shutil.copy2(self.base / 'config.json', base / 'config.json')
+        self.bases.append(base)
+        return base
+
+    def run_web(self, command, success=True, private_umask=False, base=None):
         result = subprocess.run(
-            [str(BINARY), '--base', str(self.base), 'web', command],
+            [str(BINARY), '--base', str(base or self.base), 'web', command],
             capture_output=True, text=True, env=self.env, timeout=20,
             preexec_fn=(lambda: os.umask(0o077)) if private_umask else None,
         )
         self.assertEqual(result.returncode == 0, success, result.stderr)
+        return result
+
+    def run_uninstall(self, base=None):
+        result = subprocess.run(
+            [str(BINARY), '--base', str(base or self.base), 'uninstall', '--yes'],
+            capture_output=True, text=True, env=self.env, timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
         return result
 
     def make_root(self, public_mode=0o755, root_mode=0o755):
@@ -146,6 +166,18 @@ class WebInstallation(unittest.TestCase):
         self.assertEqual((self.base / 'web.json').read_bytes(), original)
         self.assertEqual(len(self.calls.read_text().splitlines()), 1)
 
+    def test_generated_gateway_uses_closed_hex_ownership_and_upgrades_legacy_files(self):
+        self.make_root()
+        self.write_state()
+        self.write_managed_files()
+        self.run_web('install')
+        owner = '[helios-container base:' + os.fsencode(self.base.resolve()).hex() + ']'
+        for name, marker in (('index.php', MARKER), ('.htaccess', ACCESS_MARKER)):
+            first_line = (self.root / name).read_text().splitlines()[0]
+            self.assertIn(marker + ' ' + owner, first_line)
+            self.assertTrue(first_line.isascii())
+            self.assertNotIn(str(self.base), first_line)
+
     def test_http_error_reports_url_and_curl_stderr_and_removes_probe(self):
         self.env['HC_CURL_MODE'] = 'http-error'
         result = self.run_web('install', success=False)
@@ -199,16 +231,104 @@ class WebInstallation(unittest.TestCase):
         self.run_web('remove')
 
     def test_uninstall_removes_orphan_gateway_and_preserves_frontend(self):
-        self.make_root()
-        self.write_managed_files()
+        self.run_web('install')
+        self.run_web('stop')
+        for name in ('web.json', 'web.pid', 'web.log'):
+            (self.base / name).unlink(missing_ok=True)
         (self.root / 'keep.txt').write_text('frontend')
-        result = subprocess.run(
-            [str(BINARY), '--base', str(self.base), 'uninstall', '--yes'],
-            capture_output=True, text=True, env=self.env, timeout=20,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.run_uninstall()
         self.assertFalse(self.base.exists())
         self.assertEqual(list(self.root.iterdir()), [self.root / 'keep.txt'])
+
+    def test_uninstall_other_prefix_preserves_gateway_and_its_installation(self):
+        other = self.make_base('kit-other')
+        self.run_web('install', base=other)
+        original_gateway = {
+            name: (self.root / name).read_bytes() for name in ('index.php', '.htaccess')
+        }
+        original_config = (other / 'config.json').read_bytes()
+        original_state = (other / 'web.json').read_bytes()
+        launchers = self.home / '.local' / 'bin'
+        launchers.mkdir(parents=True)
+        original_launchers = {}
+        for name in ('helios-container', 'docker'):
+            args = ' docker' if name == 'docker' else ''
+            text = '#!/bin/sh\n# helios-container managed launcher\nexec '
+            text += shlex.quote(str(other / 'helios-container-native'))
+            text += ' --base ' + shlex.quote(str(other)) + args + ' "$@"\n'
+            (launchers / name).write_text(text)
+            (launchers / name).chmod(0o700)
+            original_launchers[name] = (launchers / name).read_bytes()
+        profile = self.home / '.profile'
+        profile.write_text(
+            'export KEEP=value\n# >>> helios-container >>>\n'
+            'export PATH="$HOME/.local/bin:$PATH"\n# <<< helios-container <<<\n'
+        )
+        original_profile = profile.read_bytes()
+        (self.base / 'web.log').write_text('unrelated old log')
+        shutil.copy2(other / 'web.pid', self.base / 'web.pid')
+        self.run_uninstall()
+        self.assertFalse(self.base.exists())
+        self.assertTrue((other / 'helios-container-native').is_file())
+        self.assertEqual((other / 'config.json').read_bytes(), original_config)
+        self.assertEqual((other / 'web.json').read_bytes(), original_state)
+        for name, original in original_gateway.items():
+            self.assertEqual((self.root / name).read_bytes(), original)
+        for name, original in original_launchers.items():
+            self.assertEqual((launchers / name).read_bytes(), original)
+        self.assertEqual(profile.read_bytes(), original_profile)
+        self.assertIn('работает', self.run_web('info', base=other).stdout)
+
+    def test_uninstall_preserves_legacy_orphan_without_known_owner(self):
+        self.make_root()
+        self.write_managed_files()
+        original_gateway = {
+            name: (self.root / name).read_bytes() for name in ('index.php', '.htaccess')
+        }
+        self.run_uninstall()
+        self.assertFalse(self.base.exists())
+        for name, original in original_gateway.items():
+            self.assertEqual((self.root / name).read_bytes(), original)
+
+    def test_uninstall_stops_local_agent_without_state_and_preserves_unknown_gateway(self):
+        self.run_web('install')
+        pid = (self.base / 'web.pid').read_text().strip()
+        self.write_managed_files()
+        (self.base / 'web.json').unlink()
+        self.run_uninstall()
+        self.assertFalse(self.base.exists())
+        self.assertIn(MARKER, (self.root / 'index.php').read_text())
+        self.assertIn(ACCESS_MARKER, (self.root / '.htaccess').read_text())
+        process = subprocess.run(
+            ['ps', '-ww', '-p', pid, '-o', 'command='],
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertNotIn('_agent', process.stdout)
+
+    def test_explicit_remove_and_install_refuse_another_prefix_ownership(self):
+        other = self.make_base('kit-other')
+        self.run_web('install', base=other)
+        original_gateway = {
+            name: (self.root / name).read_bytes() for name in ('index.php', '.htaccess')
+        }
+        self.run_web('remove', success=False)
+        shutil.copy2(other / 'web.json', self.base / 'web.json')
+        original_state = (self.base / 'web.json').read_bytes()
+        for command in ('install', 'remove'):
+            result = self.run_web(command, success=False)
+            self.assertIn('другой установке', result.stderr)
+            self.assertEqual((self.base / 'web.json').read_bytes(), original_state)
+            for name, original in original_gateway.items():
+                self.assertEqual((self.root / name).read_bytes(), original)
+        self.assertIn('работает', self.run_web('info', base=other).stdout)
+
+    def test_state_owned_legacy_gateway_remains_removable(self):
+        self.make_root()
+        self.write_state()
+        self.write_managed_files()
+        self.run_web('remove')
+        self.assertFalse(self.root.exists())
+        self.assertFalse((self.base / 'web.json').exists())
 
     def test_uninstall_preserves_unrelated_public_symlink_without_state(self):
         outside = self.fixture / 'website'

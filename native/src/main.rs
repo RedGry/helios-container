@@ -626,21 +626,22 @@ fn uninstall(kit: &Kit, args: &[String]) -> Result<()> {
     kit.stop_locked(false)?;
     agent::remove_owned(&base)?;
     let home = PathBuf::from(env::var("HOME")?);
+    let mut keep_profile = false;
     for name in ["helios-container", "docker"] {
         let path = home.join(".local/bin").join(name);
         install::no_links(&path)?;
         if path.exists() {
             let text = fs::read_to_string(&path)?;
-            if text.contains("# helios-container managed launcher")
-                && text.contains(&base.to_string_lossy().to_string())
-            {
+            if text == install::launcher(&base, name) {
                 fs::remove_file(path)?;
+            } else if text.contains("# helios-container managed launcher") {
+                keep_profile = true;
             }
         }
     }
     let path = home.join(".profile");
     install::no_links(&path)?;
-    if path.exists() {
+    if path.exists() && !keep_profile {
         let mut text = fs::read_to_string(&path)?;
         if let (Some(a), Some(b)) = (text.find(BEGIN), text.find(END)) {
             if b >= a {

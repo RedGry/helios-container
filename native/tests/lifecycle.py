@@ -108,7 +108,10 @@ try:
         marker.unlink()
     managed_bin = root/'.local/bin'
     managed_bin.mkdir(parents=True)
-    (managed_bin/'helios-container').write_text('# helios-container managed launcher\n'+str(base))
+    (managed_bin/'helios-container').write_text(
+        '#!/bin/sh\n# helios-container managed launcher\nexec '
+        + "'" + str(base/'helios-container-native').replace("'", "'\"'\"'")
+        + "' --base '" + str(base).replace("'", "'\"'\"'") + "' \"$@\"\n")
     (managed_bin/'docker').write_text('foreign docker command')
     public = root/'public_html/helios-container'
     public.mkdir(parents=True)

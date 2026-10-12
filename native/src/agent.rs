@@ -5,6 +5,7 @@ use std::{
     env, fs,
     io::{Cursor, Read},
     os::unix::{
+        ffi::OsStrExt,
         fs::{OpenOptionsExt, PermissionsExt},
         process::CommandExt,
     },
@@ -31,6 +32,8 @@ const HOP: &[&str] = &[
     "expect",
 ];
 const MARKER: &str = "// helios-container managed web gateway";
+const ACCESS_MARKER: &str = "# helios-container managed web methods";
+const OWNER_PREFIX: &str = "[helios-container base:";
 const PHP: &str = include_str!("../../gateway.php");
 const ACCESS: &str = include_str!("../../gateway.htaccess");
 fn text<'a>(v: &'a Value, key: &str) -> Result<&'a str> {
@@ -104,6 +107,13 @@ fn validate_state(state: &Value) -> Result<()> {
     }
     Ok(())
 }
+fn native_command_matches(actual: &str, expected: &str) -> bool {
+    let command = actual.trim();
+    command == expected
+        || command
+            .strip_suffix(" (helios-container-na)")
+            .is_some_and(|command| command == expected)
+}
 fn process_pid(base: &Path) -> Option<u32> {
     let pid: u32 = fs::read_to_string(base.join("web.pid"))
         .ok()?
@@ -121,10 +131,13 @@ fn process_pid(base: &Path) -> Option<u32> {
     ]))
     .ok()?;
     let (uid, cmd) = list.trim().split_once(char::is_whitespace)?;
+    let native_command = format!(
+        "{} --base {} _agent",
+        base.join("helios-container-native").to_str()?,
+        base.to_str()?
+    );
     if uid.parse::<u32>().ok()? == unsafe { libc::getuid() }
-        && ((cmd.contains("helios-container-native")
-            && cmd.contains("_agent")
-            && cmd.contains(base.to_str()?))
+        && (native_command_matches(cmd, &native_command)
             || (cmd.contains(base.join("gateway.py").to_str()?) && cmd.contains("serve")))
     {
         Some(pid)
@@ -206,8 +219,34 @@ pub fn ensure(base: &Path) -> Result<()> {
     }
     Err("Шлюз не запустился. Проверьте web.log".into())
 }
-fn safe_file(path: &Path, marker: &str) -> Result<()> {
-    if regular_file(path)? && !fs::read_to_string(path)?.contains(marker) {
+fn ownership(base: &Path) -> Result<String> {
+    let base = base.canonicalize()?;
+    let encoded: String = base
+        .as_os_str()
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Ok(format!("{OWNER_PREFIX}{encoded}]"))
+}
+fn foreign_ownership(content: &str, owner: &str) -> bool {
+    content
+        .match_indices(OWNER_PREFIX)
+        .any(|(offset, _)| !content[offset..].starts_with(owner))
+}
+fn safe_file(path: &Path, marker: &str, owner: &str) -> Result<()> {
+    if !regular_file(path)? {
+        return Ok(());
+    }
+    let content = fs::read_to_string(path)?;
+    if foreign_ownership(&content, owner) {
+        return Err(format!(
+            "Файл {} принадлежит другой установке. Существующие данные сохранены",
+            path.display()
+        )
+        .into());
+    }
+    if !content.contains(marker) {
         return Err(format!(
             "Файл {} не принадлежит kit. Существующие данные сохранены",
             path.display()
@@ -292,6 +331,7 @@ fn create_web_directory(path: &Path) -> Result<()> {
 }
 pub fn remove(base: &Path) -> Result<()> {
     let root = web_root()?;
+    let owner = ownership(base)?;
     let state_path = base.join("web.json");
     let has_state = regular_file(&state_path)?;
     if has_state && text(&read_json(&state_path)?, "directory")? != root.to_string_lossy() {
@@ -299,8 +339,8 @@ pub fn remove(base: &Path) -> Result<()> {
     }
     let index = root.join("index.php");
     let access = root.join(".htaccess");
-    safe_file(&index, MARKER)?;
-    safe_file(&access, "# helios-container managed web methods")?;
+    safe_file(&index, MARKER, &owner)?;
+    safe_file(&access, ACCESS_MARKER, &owner)?;
     let owned_root = has_state || index.exists() || access.exists();
     let files = [
         index,
@@ -326,24 +366,23 @@ pub fn remove(base: &Path) -> Result<()> {
 }
 pub fn remove_owned(base: &Path) -> Result<()> {
     let root = PathBuf::from(env::var("HOME")?).join("public_html/helios-container");
-    let has_state = ["web.json", "web.pid", "web.log"]
-        .iter()
-        .any(|name| fs::symlink_metadata(base.join(name)).is_ok());
+    let owner = ownership(base)?;
+    let has_state = fs::symlink_metadata(base.join("web.json")).is_ok();
     let has_gateway = crate::install::no_links(&root).is_ok()
         && [
             (root.join("index.php"), MARKER),
-            (
-                root.join(".htaccess"),
-                "# helios-container managed web methods",
-            ),
+            (root.join(".htaccess"), ACCESS_MARKER),
         ]
         .iter()
         .any(|(path, marker)| {
             fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file())
-                && fs::read_to_string(path).is_ok_and(|content| content.contains(marker))
+                && fs::read_to_string(path)
+                    .is_ok_and(|content| content.contains(marker) && content.contains(&owner))
         });
     if has_state || has_gateway {
         remove(base)?;
+    } else {
+        stop(base)?;
     }
     Ok(())
 }
@@ -414,18 +453,18 @@ pub fn manage(kit: &Kit, args: &[String]) -> Result<()> {
         if text(&state, "directory")? != root.to_string_lossy() {
             return Err("Неизвестный каталог шлюза".into());
         }
-        safe_file(&root.join("index.php"), MARKER)?;
-        safe_file(
-            &root.join(".htaccess"),
-            "# helios-container managed web methods",
-        )?;
+        let owner = ownership(base)?;
+        safe_file(&root.join("index.php"), MARKER, &owner)?;
+        safe_file(&root.join(".htaccess"), ACCESS_MARKER, &owner)?;
         create_web_directory(public)?;
         create_web_directory(&root)?;
         let php = PHP
+            .replace(MARKER, &format!("{MARKER} {owner}"))
             .replace("__HC_PORT__", &state["agent_port"].to_string())
             .replace("__HC_BRIDGE__", text(&state, "bridge_key")?);
+        let access = ACCESS.replace(ACCESS_MARKER, &format!("{ACCESS_MARKER} {owner}"));
         atomic(&root.join("index.php"), php.as_bytes(), 0o644)?;
-        atomic(&root.join(".htaccess"), ACCESS.as_bytes(), 0o644)?;
+        atomic(&root.join(".htaccess"), access.as_bytes(), 0o644)?;
         atomic(
             &base.join("web.json"),
             serde_json::to_vec_pretty(&state)?.as_slice(),
@@ -857,6 +896,26 @@ pub fn serve(base: PathBuf) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_pid_accepts_verified_ps_suffix_and_requires_exact_installation() {
+        let base = "/tmp/student's home/kit";
+        let command = format!("{base}/helios-container-native --base {base} _agent");
+        assert!(native_command_matches(&command, &command));
+        assert!(native_command_matches(
+            &format!("{command} (helios-container-na)"),
+            &command
+        ));
+        for unrelated in [
+            command.replace("/kit", "/kit-other"),
+            format!("{base}/helios-container-native --base {base}-other _agent"),
+            format!("prefix {command}"),
+            format!("{command} extra"),
+            format!("{command} (other-process)"),
+            format!("{command} (helios-container-na) extra"),
+        ] {
+            assert!(!native_command_matches(&unrelated, &command));
+        }
+    }
     #[test]
     fn ports_are_bounded_and_deduplicated() {
         assert_eq!(parse_ports("8080, 8080 host:3000").unwrap().len(), 2);
