@@ -56,7 +56,7 @@ jobs:
             pw useradd helios-release-test -m -d /var/helios-release-test -s /bin/sh
             install -m 755 dist/helios-container-freebsd-amd64 /var/helios-release-test/helios-container-native
             install -m 644 dist/VERSION /var/helios-release-test/VERSION
-            su -l helios-release-test -c './helios-container-native install --cpus 8 --no-profile && .local/bin/docker run --rm hello-world && .local/bin/docker compose version && .local/bin/helios-container stop'
+            su -l helios-release-test -c './helios-container-native install --cpus 8 --no-profile && .local/bin/docker run --rm hello-world && .local/bin/docker compose version && .local/bin/helios-container stop' < /dev/null
       - name: Create draft only
         env:
           GH_TOKEN: ${{ github.token }}

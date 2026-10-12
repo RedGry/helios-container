@@ -451,7 +451,7 @@ impl Kit {
         let lifecycle_lock = FileLock::exclusive(&self.base.join(".lifecycle.lock"))?;
         let running = self.pid().is_some();
         if running {
-            checked(&mut self.ssh("sync && fstrim -v /", false))?;
+            checked(self.ssh("sync && fstrim -v /", false).stdin(Stdio::null()))?;
             self.stop_locked(false)?;
         }
         let image = self.base.join("qemu/usr/local/bin/qemu-img");
@@ -848,7 +848,7 @@ fn main_inner() -> Result<i32> {
             if args[0] == "optimize" {
                 install::optimize_guest(&kit)?;
             } else {
-                checked(&mut kit.ssh("sync && fstrim -v /", false))?;
+                checked(kit.ssh("sync && fstrim -v /", false).stdin(Stdio::null()))?;
             }
         }
         "update" | "check-update" => update::run(&kit, &args)?,

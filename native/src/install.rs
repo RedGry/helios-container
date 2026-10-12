@@ -395,13 +395,16 @@ pub(super) fn launchers(base: &Path) -> Result<()> {
 }
 
 pub(super) fn optimize_guest(kit: &Kit) -> Result<()> {
-    checked(&mut kit.ssh(
-        &format!(
-            "HC_FINISH_BOOTSTRAP=1\n{}",
-            include_str!("../guest-optimize.sh")
-        ),
-        false,
-    ))
+    checked(
+        kit.ssh(
+            &format!(
+                "HC_FINISH_BOOTSTRAP=1\n{}",
+                include_str!("../guest-optimize.sh")
+            ),
+            false,
+        )
+        .stdin(Stdio::null()),
+    )
 }
 
 pub(super) fn run(args: &[String]) -> Result<()> {

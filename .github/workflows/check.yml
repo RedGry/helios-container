@@ -47,7 +47,7 @@ jobs:
             pw useradd helios-install-test -m -d /var/helios-install-test -s /bin/sh
             install -m 755 native/target/release/helios-container-native /var/helios-install-test/helios-container-native
             install -m 644 VERSION /var/helios-install-test/VERSION
-            su -l helios-install-test -c './helios-container-native install --cpus 2 --no-profile && .local/bin/docker run --rm hello-world && .local/bin/docker compose version && .local/bin/helios-container stop && .local/bin/helios-container start && .local/bin/docker run --rm hello-world && .local/bin/helios-container uninstall --yes'
+            su -l helios-install-test -c './helios-container-native install --cpus 2 --no-profile && .local/bin/docker run --rm hello-world && .local/bin/docker compose version && .local/bin/helios-container stop && .local/bin/helios-container start && .local/bin/docker run --rm hello-world && .local/bin/helios-container uninstall --yes' < /dev/null
             python3.11 tools/release.py --binary native/target/release/helios-container-native
             python3.11 tools/release.py --verify
       - uses: actions/upload-artifact@v7
