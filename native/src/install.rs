@@ -329,7 +329,7 @@ write_files:
       https://dl-cdn.alpinelinux.org/alpine/v3.24/community
   - path: /etc/docker/daemon.json
     content: |
-      {{"log-driver":"local","log-opts":{{"max-size":"10m","max-file":"3"}}}}
+      {{"features":{{"containerd-snapshotter":false}},"storage-driver":"overlay2","log-driver":"local","log-opts":{{"max-size":"10m","max-file":"3"}}}}
   - path: /root/install-docker.sh
     permissions: '0700'
     content: |
