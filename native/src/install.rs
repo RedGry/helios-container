@@ -329,14 +329,13 @@ write_files:
       https://dl-cdn.alpinelinux.org/alpine/v3.24/community
   - path: /etc/docker/daemon.json
     content: |
-      {{"log-driver":"local","log-opts":{{"max-size":"10m","max-file":"3"}}}}
+      {{"features":{{"containerd-snapshotter":false}},"storage-driver":"overlay2","log-driver":"local","log-opts":{{"max-size":"10m","max-file":"3"}}}}
   - path: /root/install-docker.sh
     permissions: '0700'
     content: |
       #!/bin/sh
       set -eu
-      apk update
-      apk add docker docker-cli-compose openssh-client util-linux-misc
+      apk add --no-cache docker docker-cli-compose openssh-client util-linux-misc
       mkdir -p /workspace
       rc-update add cgroups boot
       rc-service cgroups start
@@ -368,11 +367,21 @@ runcmd:
     Ok(())
 }
 
+pub(super) fn launcher(base: &Path, name: &str) -> String {
+    let args = if name == "docker" { " docker" } else { "" };
+    format!(
+        "#!/bin/sh\n# helios-container managed launcher\nexec {} --base {}{} \"$@\"\n",
+        quote(&base.join("helios-container-native").to_string_lossy()),
+        quote(&base.to_string_lossy()),
+        args
+    )
+}
+
 pub(super) fn launchers(base: &Path) -> Result<()> {
     let bin = PathBuf::from(env::var("HOME")?).join(".local/bin");
     no_links(&bin)?;
     fs::create_dir_all(&bin)?;
-    for (name, args) in [("helios-container", ""), ("docker", " docker")] {
+    for name in ["helios-container", "docker"] {
         let target = bin.join(name);
         no_links(&target)?;
         if target.exists()
@@ -380,19 +389,22 @@ pub(super) fn launchers(base: &Path) -> Result<()> {
         {
             return Err(format!("{} не принадлежит kit", target.display()).into());
         }
-        atomic(
-            &target,
-            format!(
-                "#!/bin/sh\n# helios-container managed launcher\nexec {} --base {}{} \"$@\"\n",
-                quote(&base.join("helios-container-native").to_string_lossy()),
-                quote(&base.to_string_lossy()),
-                args
-            )
-            .as_bytes(),
-            0o700,
-        )?;
+        atomic(&target, launcher(base, name).as_bytes(), 0o700)?;
     }
     Ok(())
+}
+
+pub(super) fn optimize_guest(kit: &Kit) -> Result<()> {
+    checked(
+        kit.ssh(
+            &format!(
+                "HC_FINISH_BOOTSTRAP=1\n{}",
+                include_str!("../guest-optimize.sh")
+            ),
+            false,
+        )
+        .stdin(Stdio::null()),
+    )
 }
 
 pub(super) fn run(args: &[String]) -> Result<()> {
@@ -555,6 +567,8 @@ pub(super) fn run(args: &[String]) -> Result<()> {
     }
     drop(lock);
     kit.start(true)?;
+    let _lease = Lease::acquire(&kit.base)?;
+    optimize_guest(&kit)?;
     println!("Готово. Выполните: . ~/.profile\nЗатем: docker run --rm hello-world");
     Ok(())
 }

@@ -351,7 +351,7 @@ impl Dashboard {
         let command = format!("( {command} ); exit 0");
         let mut stage = "ssh";
         let result = (|| -> Result<()> {
-            let raw = ssh(kit, &command, 15, 8 * 1024 * 1024)?;
+            let raw = ssh(kit, &command, 45, 8 * 1024 * 1024)?;
             stage = "health marker";
             let (health, raw) = raw.split_once("\nHC_INVENTORY\n").ok_or("Нет данных VM")?;
             let lines: Vec<_> = health.lines().skip(1).collect();

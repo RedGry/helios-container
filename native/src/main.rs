@@ -39,7 +39,18 @@ fn checked(cmd: &mut Command) -> Result<()> {
 fn output(cmd: &mut Command) -> Result<String> {
     let out = cmd.output()?;
     if !out.status.success() {
-        return Err("Команда не выполнена".into());
+        let detail = String::from_utf8_lossy(&out.stderr);
+        return Err(format!(
+            "{} завершилась с кодом {}{}",
+            cmd.get_program().to_string_lossy(),
+            out.status.code().unwrap_or(1),
+            if detail.trim().is_empty() {
+                String::new()
+            } else {
+                format!(": {}", detail.trim())
+            }
+        )
+        .into());
     }
     Ok(String::from_utf8(out.stdout)?)
 }
@@ -399,6 +410,9 @@ impl Kit {
     }
     fn stop(&self, force: bool) -> Result<()> {
         let _lock = FileLock::exclusive(&self.base.join(".lifecycle.lock"))?;
+        self.stop_locked(force)
+    }
+    fn stop_locked(&self, force: bool) -> Result<()> {
         if self.pid().is_none() {
             println!("VM остановлена");
             return Ok(());
@@ -412,6 +426,79 @@ impl Kit {
             return Err("Выключение ещё не завершилось. Проверьте status".into());
         }
         println!("VM остановлена");
+        Ok(())
+    }
+    fn compact(&self) -> Result<()> {
+        install::safe_base(&self.base)?;
+        let disk = self.vm().join("docker.qcow2");
+        let temporary = self
+            .vm()
+            .join(format!(".compact-{}.qcow2", std::process::id()));
+        for path in [
+            disk.clone(),
+            temporary.clone(),
+            self.vm().join("activity.lock"),
+            self.base.join(".update.lock"),
+            self.base.join(".lifecycle.lock"),
+        ] {
+            install::no_links(&path)?;
+        }
+        if temporary.exists() {
+            return Err("Временный файл уплотнения уже существует; исходный диск сохранён".into());
+        }
+        let _activity = FileLock::exclusive(&self.vm().join("activity.lock"))?;
+        let update_lock = FileLock::exclusive(&self.base.join(".update.lock"))?;
+        let lifecycle_lock = FileLock::exclusive(&self.base.join(".lifecycle.lock"))?;
+        let running = self.pid().is_some();
+        if running {
+            checked(self.ssh("sync && fstrim -v /", false).stdin(Stdio::null()))?;
+            self.stop_locked(false)?;
+        }
+        let image = self.base.join("qemu/usr/local/bin/qemu-img");
+        let command = |verb: &str| {
+            let mut cmd = Command::new(&image);
+            cmd.env("LD_LIBRARY_PATH", self.base.join("qemu/usr/local/lib"))
+                .env("QEMU_MODULE_DIR", self.base.join("qemu/usr/local/lib/qemu"))
+                .arg(verb);
+            cmd
+        };
+        let result = (|| -> Result<()> {
+            checked(
+                command("convert")
+                    .args(["-c", "-f", "qcow2", "-O", "qcow2"])
+                    .arg(&disk)
+                    .arg(&temporary),
+            )?;
+            fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))?;
+            checked(
+                command("compare")
+                    .args(["-f", "qcow2", "-F", "qcow2"])
+                    .arg(&disk)
+                    .arg(&temporary),
+            )?;
+            fs::File::open(&temporary)?.sync_all()?;
+            fs::rename(&temporary, &disk)?;
+            fs::File::open(self.vm())?.sync_all()?;
+            Ok(())
+        })();
+        let _ = fs::remove_file(&temporary);
+        drop(lifecycle_lock);
+        drop(update_lock);
+        if running {
+            if let Err(error) = self.start(true) {
+                let detail = result
+                    .as_ref()
+                    .err()
+                    .map(|failure| format!(" Ошибка уплотнения: {failure}."))
+                    .unwrap_or_default();
+                return Err(
+                    format!("Данные диска сохранены.{detail} VM не запустилась: {error}").into(),
+                );
+            }
+        }
+        result
+            .map_err(|error| format!("Данные диска сохранены. Уплотнение не завершено: {error}"))?;
+        println!("Диск уплотнён; равенство данных проверено qemu-img compare");
         Ok(())
     }
     fn ensure_services(&self) -> Result<()> {
@@ -526,34 +613,35 @@ fn profile(base: &Path) -> Result<()> {
 }
 fn uninstall(kit: &Kit, args: &[String]) -> Result<()> {
     if args != ["--yes"] {
-        return Err("uninstall --yes удалит VM, контейнеры, volumes и настройки без возможности восстановления. Сначала выполните stop".into());
+        return Err("uninstall --yes остановит VM и удалит приложение, web, контейнеры, volumes и настройки без возможности восстановления".into());
     }
     let base = install::safe_base(&kit.base)?;
+    for name in ["vm/activity.lock", ".update.lock", ".lifecycle.lock"] {
+        install::no_links(&base.join(name))?;
+    }
+    let _activity = FileLock::exclusive(&base.join("vm/activity.lock"))?;
     let _update = FileLock::exclusive(&base.join(".update.lock"))?;
     let _lifecycle = FileLock::exclusive(&base.join(".lifecycle.lock"))?;
-    if kit.pid().is_some() {
-        return Err("Сначала выполните helios-container stop".into());
-    }
     idle::stop(&base)?;
-    if base.join("web.json").exists() {
-        agent::manage(kit, &["remove".into()])?;
-    }
+    kit.stop_locked(false)?;
+    agent::remove_owned(&base)?;
     let home = PathBuf::from(env::var("HOME")?);
+    let mut keep_profile = false;
     for name in ["helios-container", "docker"] {
         let path = home.join(".local/bin").join(name);
         install::no_links(&path)?;
         if path.exists() {
             let text = fs::read_to_string(&path)?;
-            if text.contains("# helios-container managed launcher")
-                && text.contains(&base.to_string_lossy().to_string())
-            {
+            if text == install::launcher(&base, name) {
                 fs::remove_file(path)?;
+            } else if text.contains("# helios-container managed launcher") {
+                keep_profile = true;
             }
         }
     }
     let path = home.join(".profile");
     install::no_links(&path)?;
-    if path.exists() {
+    if path.exists() && !keep_profile {
         let mut text = fs::read_to_string(&path)?;
         if let (Some(a), Some(b)) = (text.find(BEGIN), text.find(END)) {
             if b >= a {
@@ -577,7 +665,7 @@ fn main_inner() -> Result<i32> {
         args.remove(0);
     }
     if args.is_empty() || ["--help", "-h", "help"].contains(&args[0].as_str()) {
-        println!("helios-container (Rust)\nstart, stop [--force], status, docker …, ssh …, upload, download, forward, configure, logs, profile, version\ninstall, web, update, check-update, uninstall: нативные команды\n--base PATH: существующий каталог kit");
+        println!("helios-container (Rust)\nstart, stop [--force], status, docker …, ssh …, upload, download, forward, configure, logs, profile, version\noptimize: завершить первичную настройку Linux и освободить блоки диска\ntrim: вернуть свободные блоки диска без удаления данных\ncompact: уплотнить qcow2 с проверкой данных и временной остановкой VM\ninstall, web, update, check-update, uninstall --yes\n--base PATH: существующий каталог kit");
         return Ok(0);
     }
     if args[0] == "--build-version" {
@@ -746,6 +834,24 @@ fn main_inner() -> Result<i32> {
                 .unwrap_or(1));
         }
         "web" => agent::manage(&kit, &args[1..])?,
+        "compact" => {
+            if args.len() != 1 {
+                return Err("compact не принимает параметры".into());
+            }
+            kit.compact()?;
+        }
+        "optimize" | "trim" => {
+            if args.len() != 1 {
+                return Err("optimize и trim не принимают параметры".into());
+            }
+            let _lease = Lease::acquire(&kit.base)?;
+            kit.start(true)?;
+            if args[0] == "optimize" {
+                install::optimize_guest(&kit)?;
+            } else {
+                checked(kit.ssh("sync && fstrim -v /", false).stdin(Stdio::null()))?;
+            }
+        }
         "update" | "check-update" => update::run(&kit, &args)?,
         "uninstall" => uninstall(&kit, &args[1..])?,
         _ => return Err("Неизвестная команда. Выполните helios-container --help".into()),
@@ -768,6 +874,20 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn failed_output_preserves_program_exit_code_and_stderr() {
+        let error =
+            output(Command::new("sh").args(["-c", "echo 'HTTP 403 Forbidden' >&2; exit 22"]))
+                .unwrap_err()
+                .to_string();
+        assert!(error.contains("sh"));
+        assert!(error.contains("22"));
+        assert!(error.contains("HTTP 403 Forbidden"));
+        let empty = output(Command::new("sh").args(["-c", "exit 7"]))
+            .unwrap_err()
+            .to_string();
+        assert!(empty.contains("7"));
+    }
     #[test]
     fn bounded_command_drains_more_than_pipe_capacity() {
         let raw = short_output(

@@ -4,6 +4,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import shlex
 import socket
 import subprocess
 import sys
@@ -131,5 +132,72 @@ class Contract(unittest.TestCase):
         for ports in ['host:22','https://example.com','1,2,3,4,5,6,7,8,9']:
             self.assertEqual(self.request('/_config','POST',json.dumps({'ports':ports}),auth)[0],400)
         self.assertEqual((self.base/'web.json').read_bytes(),original)
+
+class DelayedInventory(unittest.TestCase):
+    def test_slow_inventory_populates_images_and_volumes_without_blocking_http(self):
+        with tempfile.TemporaryDirectory(prefix='hc-inventory-test-', dir=Path.home()) as temp:
+            base = Path(temp).resolve()
+            (base/'vm').mkdir()
+            (base/'bin').mkdir()
+            disk = base/'vm/docker.qcow2'
+            disk.write_bytes(b'fixture')
+            container_id = 'c'*64
+            image_id = 'sha256:'+'b'*64
+            container = json.dumps({'ID':container_id,'Names':'demo','Image':'demo:latest','State':'running','Status':'Up','project':'demo'})
+            image = json.dumps({'ID':image_id,'Repository':'demo','Tag':'latest','CreatedAt':'2026-10-13T00:00:00Z','Size':'10MB'})
+            volume = json.dumps({'Name':'demo-data','Driver':'local','Scope':'local','project':'demo'})
+            details = json.dumps({'ID':container_id,'image_id':image_id,'started_at':'2026-10-13T00:00:00Z','mounts':[{'Type':'volume','Name':'demo-data','Destination':'/data','RW':True}]})
+            health = 'HC_HEALTH\n1048576\n524288\ncpu 1 0 0 5 0 0 0 0\n/dev/vda 1048576 100 900 10% /\n'
+            full = health+'\nHC_INVENTORY\n'+container+'\nHC_IMAGES\n'+image+'\nHC_VOLUMES\n'+volume+'\nHC_MOUNTS\n'+details+'\nHC_STATS\n\nHC_MEMORY\n1048576\nHC_VERSION\n29.8.2\n'
+            stub = base/'bin/ssh'
+            script = base/'ssh-fixture.py'
+            script.write_text('import sys,time\ncommand=sys.argv[-1]\n'
+                'if "HC_IMAGES" in command:\n time.sleep(16)\n sys.stdout.write('+repr(full)+')\n'
+                'elif "HC_INVENTORY" in command:\n sys.stdout.write('+repr(health+'\nHC_INVENTORY\n'+container+'\n')+')\n'
+                'elif "HC_VOLUME_META" in command:\n print(\'{}\\nHC_VOLUME_META\\n\')\n'
+                'else:\n print('+repr(container)+')\n')
+            stub.write_text('#!/bin/sh\nexec '+shlex.quote(sys.executable)+' '+shlex.quote(str(script))+' "$@"\n')
+            stub.chmod(0o700)
+            with socket.socket() as listener:
+                listener.bind(('127.0.0.1',0))
+                port = listener.getsockname()[1]
+            (base/'config.json').write_text(json.dumps({'memory_mib':1024,'cpus':1,'ssh_port':28022,'auto_stop':False,'forwards':[]}))
+            (base/'web.json').write_text(json.dumps({'agent_port':port,'bridge_key':'b'*64,'admin_key':'a'*64,'routes':[]}))
+            vm = subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)','qemu-system-x86_64',str(disk)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            (base/'vm/qemu.pid').write_text(str(vm.pid))
+            environment = dict(os.environ,PATH=str(base/'bin')+os.pathsep+os.environ['PATH'])
+            agent = subprocess.Popen([BINARY,'--base',str(base),'_agent'],env=environment,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            try:
+                deadline = time.monotonic()+24
+                data = None
+                while time.monotonic()<deadline:
+                    connection = http.client.HTTPConnection('127.0.0.1',port,timeout=2)
+                    try:
+                        started = time.monotonic()
+                        connection.request('GET','/_dashboard',headers={'X-HC-Bridge':'b'*64,'X-HC-Admin':'a'*64})
+                        response = connection.getresponse()
+                        self.assertEqual(response.status,200)
+                        data = json.loads(response.read())
+                        self.assertLess(time.monotonic()-started,1)
+                        if data['images'] and data['volumes']:
+                            break
+                    except OSError:
+                        self.assertIsNone(agent.poll())
+                    finally:
+                        connection.close()
+                    time.sleep(.5)
+                self.assertIsNotNone(data)
+                self.assertEqual(len(data['containers']),1)
+                self.assertEqual(len(data['images']),1)
+                self.assertEqual(len(data['volumes']),1)
+                self.assertEqual(data['images'][0]['containers'],['demo'])
+                self.assertEqual(data['volumes'][0]['containers'],['demo'])
+                self.assertIsNone(data['error'])
+                self.assertFalse(data.get('inventory_pending',False))
+            finally:
+                agent.terminate()
+                agent.wait(timeout=10)
+                vm.terminate()
+                vm.wait(timeout=10)
 
 unittest.main()
